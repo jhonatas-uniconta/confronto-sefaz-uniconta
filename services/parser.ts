@@ -72,7 +72,7 @@ export const parseAccountingFile = async (file: File): Promise<AccountingRecord[
   });
 };
 
-// --- HTML Parser ---
+// --- HTML Parser (Single File) ---
 
 export const parseSefazHtml = async (file: File): Promise<SefazRecord[]> => {
   return new Promise((resolve, reject) => {
@@ -117,7 +117,9 @@ export const parseSefazHtml = async (file: File): Promise<SefazRecord[]> => {
         }
 
         if (!targetTable) {
-            throw new Error("Tabela de notas não encontrada no HTML. Verifique se salvou a página corretamente.");
+            // Note: If parsing fails for one file in a batch, we might want to just return empty or throw specific error.
+            // For now, we throw.
+            throw new Error(`Tabela de notas não encontrada no arquivo ${file.name}.`);
         }
 
         const records: SefazRecord[] = [];
@@ -165,7 +167,35 @@ export const parseSefazHtml = async (file: File): Promise<SefazRecord[]> => {
         reject(err);
       }
     };
-    reader.onerror = () => reject(new Error("Erro ao ler o arquivo HTML."));
+    reader.onerror = () => reject(new Error(`Erro ao ler o arquivo ${file.name}.`));
     reader.readAsText(file, "ISO-8859-1"); 
   });
+};
+
+// --- HTML Parser (Multiple Files) ---
+
+export const parseSefazFiles = async (files: File[]): Promise<SefazRecord[]> => {
+    try {
+        // Run parsers in parallel
+        const promises = files.map(file => parseSefazHtml(file));
+        const results = await Promise.all(promises);
+
+        // Flatten results
+        const allRecords: SefazRecord[] = [];
+        results.forEach(fileRecords => {
+            allRecords.push(...fileRecords);
+        });
+
+        // Deduplicate by 'chave'
+        const uniqueMap = new Map<string, SefazRecord>();
+        allRecords.forEach(record => {
+            if (record.chave && !uniqueMap.has(record.chave)) {
+                uniqueMap.set(record.chave, record);
+            }
+        });
+
+        return Array.from(uniqueMap.values());
+    } catch (error) {
+        throw error;
+    }
 };

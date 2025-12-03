@@ -1,18 +1,19 @@
 import React from 'react';
-import { Upload, CheckCircle, AlertCircle, FileText } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, FileText, Files } from 'lucide-react';
 
 interface FileUploadProps {
     label: string;
     accept: string;
-    onFileSelect: (file: File) => void;
+    onFileSelect: (files: File[]) => void;
     fileName?: string;
     disabled?: boolean;
+    multiple?: boolean;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ label, accept, onFileSelect, fileName, disabled }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ label, accept, onFileSelect, fileName, disabled, multiple = false }) => {
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        if (e.target.files && e.target.files[0]) {
-            onFileSelect(e.target.files[0]);
+        if (e.target.files && e.target.files.length > 0) {
+            onFileSelect(Array.from(e.target.files));
         }
     };
 
@@ -21,20 +22,21 @@ export const FileUpload: React.FC<FileUploadProps> = ({ label, accept, onFileSel
             <label className="block text-sm font-semibold text-gray-700 mb-2">{label}</label>
             <div className="flex items-center gap-3">
                 <label className={`
-                    flex items-center gap-2 px-4 py-2 rounded-lg border transition-all cursor-pointer
+                    flex items-center gap-2 px-4 py-2 rounded-lg border transition-all cursor-pointer select-none
                     ${disabled 
                         ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed' 
                         : 'bg-white text-slate-700 border-gray-300 hover:border-blue-500 hover:shadow-sm'
                     }
                 `}>
-                    <Upload size={18} />
-                    <span className="text-sm font-medium">Escolher Arquivo</span>
+                    {multiple ? <Files size={18} /> : <Upload size={18} />}
+                    <span className="text-sm font-medium">{multiple ? 'Escolher Arquivos' : 'Escolher Arquivo'}</span>
                     <input 
                         type="file" 
                         className="hidden" 
                         accept={accept} 
                         onChange={handleChange} 
                         disabled={disabled}
+                        multiple={multiple}
                     />
                 </label>
                 {fileName ? (
@@ -94,6 +96,7 @@ export const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
     else if (status === 'Não Lançada') style = "bg-red-50 text-red-700 border border-red-200";
     else if (status === 'Cancelada') style = "bg-orange-50 text-orange-700 border border-orange-200";
     else if (status === 'Autorizada') style = "bg-blue-50 text-blue-700 border border-blue-200";
+    else if (status === 'Não encontrada na SEFAZ') style = "bg-yellow-50 text-yellow-700 border border-yellow-200";
     
     return (
         <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${style}`}>

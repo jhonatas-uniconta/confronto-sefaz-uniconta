@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
-import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, CheckCheck, LayoutDashboard } from 'lucide-react';
-import { parseAccountingFile, parseSefazHtml } from './services/parser';
+import React, { useState, useMemo, useEffect } from 'react';
+import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, CheckCheck, LayoutDashboard, ChevronLeft, ChevronRight } from 'lucide-react';
+import { parseAccountingFile, parseSefazFiles } from './services/parser';
 import { exportToPdf } from './services/pdfService';
 import { AccountingRecord, SefazRecord, ComparisonResult, MatchStatus, SummaryStats } from './types';
 import { FileUpload, Button, Card, StatusBadge } from './components/ui';
@@ -12,6 +12,10 @@ const App: React.FC = () => {
   const [sefazData, setSefazData] = useState<SefazRecord[]>([]);
   const [results, setResults] = useState<ComparisonResult[]>([]);
   const [isCompared, setIsCompared] = useState(false);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 100;
   
   // File names for UI feedback
   const [accountingFileName, setAccountingFileName] = useState('');
@@ -25,7 +29,9 @@ const App: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   // Handlers
-  const handleAccountingUpload = async (file: File) => {
+  const handleAccountingUpload = async (files: File[]) => {
+    if (files.length === 0) return;
+    const file = files[0]; // Accounting usually one file
     try {
       setError(null);
       const data = await parseAccountingFile(file);
@@ -37,15 +43,16 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSefazUpload = async (file: File) => {
+  const handleSefazUpload = async (files: File[]) => {
+    if (files.length === 0) return;
     try {
       setError(null);
-      const data = await parseSefazHtml(file);
+      const data = await parseSefazFiles(files);
       setSefazData(data);
-      setSefazFileName(file.name);
+      setSefazFileName(files.length > 1 ? `${files.length} arquivos selecionados` : files[0].name);
       setIsCompared(false);
     } catch (err: any) {
-      setError(`Erro no arquivo SEFAZ: ${err.message}`);
+      setError(`Erro nos arquivos SEFAZ: ${err.message}`);
     }
   };
 
@@ -55,7 +62,14 @@ const App: React.FC = () => {
       return;
     }
 
-    const mapAccounting = new Map(accountingData.map(item => [item.chave, item]));
+    // Create a typed Map for efficient lookups
+    const mapAccounting = new Map<string, AccountingRecord>();
+    accountingData.forEach(item => {
+      if (item.chave) {
+        mapAccounting.set(item.chave, item);
+      }
+    });
+    
     const comparison: ComparisonResult[] = [];
 
     // Iterate Sefaz records (Authority)
@@ -102,6 +116,7 @@ const App: React.FC = () => {
 
     setResults(comparison);
     setIsCompared(true);
+    setCurrentPage(1); // Reset to page 1 on new comparison
   };
 
   const handleExportPDF = (onlyPending: boolean) => {
@@ -111,6 +126,11 @@ const App: React.FC = () => {
     
     exportToPdf(dataToExport, onlyPending ? 'Relatório de Pendências (Não Lançadas)' : 'Relatório Completo de Confronto');
   };
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [filterText, statusFilter]);
 
   // Stats
   const stats: SummaryStats = useMemo(() => {
@@ -131,16 +151,28 @@ const App: React.FC = () => {
   }, [results]);
 
   // Filtered Table Data
-  const filteredResults = results.filter(r => {
-    const matchesText = 
-      r.numero?.toLowerCase().includes(filterText.toLowerCase()) || 
-      r.chave?.includes(filterText) ||
-      r.situacaoSefaz?.toLowerCase().includes(filterText.toLowerCase());
+  const filteredResults = useMemo(() => {
+    return results.filter(r => {
+        const matchesText = 
+          r.numero?.toLowerCase().includes(filterText.toLowerCase()) || 
+          r.chave?.includes(filterText) ||
+          r.situacaoSefaz?.toLowerCase().includes(filterText.toLowerCase());
+        
+        const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
     
-    const matchesStatus = statusFilter === 'all' || r.status === statusFilter;
+        return matchesText && matchesStatus;
+      });
+  }, [results, filterText, statusFilter]);
 
-    return matchesText && matchesStatus;
-  });
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredResults.length / itemsPerPage);
+  const paginatedData = filteredResults.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const startRecordIndex = (currentPage - 1) * itemsPerPage + 1;
+  const endRecordIndex = Math.min(currentPage * itemsPerPage, filteredResults.length);
 
   return (
     <div className="min-h-screen pb-10">
@@ -155,7 +187,7 @@ const App: React.FC = () => {
               <p className="text-slate-400 text-sm mt-1">Ferramenta de Auditoria e Confronto Contábil x SEFAZ</p>
             </div>
             <div className="text-right hidden sm:block">
-              <span className="bg-slate-700 px-3 py-1 rounded text-xs font-mono text-slate-300">v2.0.0</span>
+              <span className="bg-slate-700 px-3 py-1 rounded text-xs font-mono text-slate-300">v2.1.0</span>
             </div>
           </div>
         </div>
@@ -191,17 +223,21 @@ const App: React.FC = () => {
             </Card>
 
             {/* Step 2 */}
-            <Card title="2. Arquivo SEFAZ" subtitle="HTML Exportado do e-Fisco" icon={<ExternalLink size={20} />}>
+            <Card title="2. Arquivo(s) SEFAZ" subtitle="HTML Exportado do e-Fisco" icon={<ExternalLink size={20} />}>
                  <div className="mb-4">
                     <a href="https://efisco.sefaz.pe.gov.br/" target="_blank" rel="noreferrer" className="text-blue-600 text-sm hover:underline flex items-center gap-1 mb-3">
                         Acessar e-Fisco <ExternalLink size={12}/>
                     </a>
                     <FileUpload 
-                        label="Selecione o arquivo HTML" 
+                        label="Selecione o(s) arquivo(s) HTML" 
                         accept=".html,.htm" 
                         onFileSelect={handleSefazUpload}
                         fileName={sefazFileName}
+                        multiple={true}
                     />
+                     <div className="text-xs text-gray-400 mt-2">
+                        Permite múltiplos arquivos (duplicatas serão removidas)
+                    </div>
                  </div>
             </Card>
 
@@ -254,7 +290,7 @@ const App: React.FC = () => {
                 </div>
 
                 {/* Main Table Card */}
-                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
                     <div className="p-5 border-b border-gray-100 flex flex-col md:flex-row justify-between items-center gap-4">
                         <h2 className="font-semibold text-lg text-gray-800">Detalhamento</h2>
                         
@@ -292,7 +328,7 @@ const App: React.FC = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
-                                {filteredResults.slice(0, 100).map((item) => (
+                                {paginatedData.map((item) => (
                                     <tr key={item.id} className="hover:bg-slate-50 transition-colors">
                                         <td className="px-6 py-3 font-medium text-gray-900">{item.numero}</td>
                                         <td className="px-6 py-3 text-gray-600">{item.serie}</td>
@@ -312,7 +348,7 @@ const App: React.FC = () => {
                                         </td>
                                     </tr>
                                 ))}
-                                {filteredResults.length === 0 && (
+                                {paginatedData.length === 0 && (
                                     <tr>
                                         <td colSpan={6} className="px-6 py-8 text-center text-gray-500">
                                             Nenhum registro encontrado com os filtros atuais.
@@ -323,13 +359,40 @@ const App: React.FC = () => {
                         </table>
                     </div>
                     
-                    {filteredResults.length > 100 && (
-                         <div className="p-3 bg-gray-50 text-center text-xs text-gray-500 border-t border-gray-200">
-                            Exibindo os primeiros 100 resultados de {filteredResults.length}. Utilize a busca para refinar.
+                    {/* Pagination Footer */}
+                    {filteredResults.length > 0 && (
+                        <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-col md:flex-row items-center justify-between gap-4">
+                            <div className="text-sm text-gray-600">
+                                Exibindo <strong>{startRecordIndex}</strong> a <strong>{endRecordIndex}</strong> de <strong>{filteredResults.length}</strong> resultados
+                            </div>
+                            
+                            <div className="flex items-center gap-2">
+                                <Button 
+                                    variant="outline" 
+                                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                                    disabled={currentPage === 1}
+                                    className="px-3 py-1.5 h-9"
+                                >
+                                    <ChevronLeft size={16} /> Anterior
+                                </Button>
+                                
+                                <span className="text-sm font-medium text-gray-700 px-2">
+                                    Página {currentPage} de {totalPages}
+                                </span>
+                                
+                                <Button 
+                                    variant="outline" 
+                                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                                    disabled={currentPage === totalPages}
+                                    className="px-3 py-1.5 h-9"
+                                >
+                                    Próximo <ChevronRight size={16} />
+                                </Button>
+                            </div>
                         </div>
                     )}
 
-                    <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-wrap gap-3 justify-end">
+                    <div className="p-4 bg-white border-t border-gray-200 flex flex-wrap gap-3 justify-end rounded-b-xl">
                         <Button variant="outline" onClick={() => handleExportPDF(false)}>
                             <Download size={16} /> PDF Completo
                         </Button>
