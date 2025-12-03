@@ -73,6 +73,7 @@ const App: React.FC = () => {
     const comparison: ComparisonResult[] = [];
 
     // Iterate Sefaz records (Authority)
+    // We ONLY care about records present in SEFAZ as requested.
     sefazData.forEach(sefaz => {
       const match = mapAccounting.get(sefaz.chave);
       let status = MatchStatus.MISSING_IN_ACCOUNTING;
@@ -81,7 +82,6 @@ const App: React.FC = () => {
         status = MatchStatus.CANCELLED;
       } else if (match) {
         status = MatchStatus.MATCHED;
-        mapAccounting.delete(sefaz.chave); // Remove found to track remaining
       }
 
       comparison.push({
@@ -99,20 +99,8 @@ const App: React.FC = () => {
       });
     });
 
-    // Remaining accounting records (exist in system but not in SEFAZ HTML)
-    mapAccounting.forEach((acc) => {
-       comparison.push({
-         id: acc.chave,
-         chave: acc.chave,
-         numero: acc.numero,
-         serie: '',
-         data: acc.dataEmissao || extractDateFromKey(acc.chave),
-         valor: acc.valor,
-         situacaoSefaz: 'Não encontrada no arquivo',
-         status: MatchStatus.MISSING_IN_SEFAZ,
-         accountingRecord: acc
-       });
-    });
+    // NOTE: We intentionally do NOT add records found in accounting but missing in SEFAZ,
+    // as the user requested to disregard them from the analysis.
 
     setResults(comparison);
     setIsCompared(true);
