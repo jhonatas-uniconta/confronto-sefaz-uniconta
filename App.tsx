@@ -1,10 +1,17 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, CheckCheck, LayoutDashboard, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, CheckCheck, LayoutDashboard, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { parseAccountingFile, parseSefazFiles } from './services/parser';
 import { exportToPdf } from './services/pdfService';
 import { AccountingRecord, SefazRecord, ComparisonResult, MatchStatus, SummaryStats } from './types';
 import { FileUpload, Button, Card, StatusBadge } from './components/ui';
 import { extractDateFromKey } from './utils';
+
+type SortDirection = 'asc' | 'desc';
+
+interface SortConfig {
+  key: keyof ComparisonResult | 'status';
+  direction: SortDirection;
+}
 
 const App: React.FC = () => {
   // State
@@ -16,6 +23,9 @@ const App: React.FC = () => {
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 100;
+
+  // Sorting State
+  const [sortConfig, setSortConfig] = useState<SortConfig | null>(null);
   
   // File names for UI feedback
   const [accountingFileName, setAccountingFileName] = useState('');
@@ -99,9 +109,6 @@ const App: React.FC = () => {
       });
     });
 
-    // NOTE: We intentionally do NOT add records found in accounting but missing in SEFAZ,
-    // as the user requested to disregard them from the analysis.
-
     setResults(comparison);
     setIsCompared(true);
     setCurrentPage(1); // Reset to page 1 on new comparison
@@ -113,6 +120,14 @@ const App: React.FC = () => {
       : results;
     
     exportToPdf(dataToExport, onlyPending ? 'Relatório de Pendências (Não Lançadas)' : 'Relatório Completo de Confronto');
+  };
+
+  const handleSort = (key: keyof ComparisonResult) => {
+    let direction: SortDirection = 'asc';
+    if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+      direction = 'desc';
+    }
+    setSortConfig({ key, direction });
   };
 
   // Reset pagination when filters change
@@ -138,9 +153,10 @@ const App: React.FC = () => {
     return s;
   }, [results]);
 
-  // Filtered Table Data
-  const filteredResults = useMemo(() => {
-    return results.filter(r => {
+  // Filtered AND Sorted Table Data
+  const processedResults = useMemo(() => {
+    // 1. Filter
+    let data = results.filter(r => {
         const matchesText = 
           r.numero?.toLowerCase().includes(filterText.toLowerCase()) || 
           r.chave?.includes(filterText) ||
@@ -150,17 +166,75 @@ const App: React.FC = () => {
     
         return matchesText && matchesStatus;
       });
-  }, [results, filterText, statusFilter]);
 
-  // Pagination Logic
-  const totalPages = Math.ceil(filteredResults.length / itemsPerPage);
-  const paginatedData = filteredResults.slice(
+    // 2. Sort
+    if (sortConfig) {
+      data = [...data].sort((a, b) => {
+        const aValue = a[sortConfig.key];
+        const bValue = b[sortConfig.key];
+
+        // Handle Dates (DD/MM/YYYY)
+        if (sortConfig.key === 'data') {
+           const parseDate = (dateStr: any) => {
+               if (!dateStr || typeof dateStr !== 'string') return 0;
+               const parts = dateStr.split('/');
+               if (parts.length !== 3) return 0;
+               return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0])).getTime();
+           };
+           const dateA = parseDate(aValue);
+           const dateB = parseDate(bValue);
+           
+           if (dateA < dateB) return sortConfig.direction === 'asc' ? -1 : 1;
+           if (dateA > dateB) return sortConfig.direction === 'asc' ? 1 : -1;
+           return 0;
+        }
+
+        // Handle numeric strings in numero/serie if possible, else string compare
+        if (aValue === bValue) return 0;
+
+        // General String/Number compare
+        if (aValue == null) return 1;
+        if (bValue == null) return -1;
+
+        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
+        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
+        return 0;
+      });
+    }
+
+    return data;
+  }, [results, filterText, statusFilter, sortConfig]);
+
+  // Pagination Logic (Applied AFTER sort)
+  const totalPages = Math.ceil(processedResults.length / itemsPerPage);
+  const paginatedData = processedResults.slice(
     (currentPage - 1) * itemsPerPage,
     currentPage * itemsPerPage
   );
 
   const startRecordIndex = (currentPage - 1) * itemsPerPage + 1;
-  const endRecordIndex = Math.min(currentPage * itemsPerPage, filteredResults.length);
+  const endRecordIndex = Math.min(currentPage * itemsPerPage, processedResults.length);
+
+  // Helper for Sort Icons
+  const SortIcon = ({ column }: { column: keyof ComparisonResult }) => {
+    if (sortConfig?.key !== column) return <ArrowUpDown size={14} className="text-gray-400 opacity-50 ml-1" />;
+    return sortConfig.direction === 'asc' 
+      ? <ArrowUp size={14} className="text-blue-600 ml-1" />
+      : <ArrowDown size={14} className="text-blue-600 ml-1" />;
+  };
+
+  // Helper for Header Click
+  const ThSortable = ({ label, column }: { label: string, column: keyof ComparisonResult }) => (
+    <th 
+        className="px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors select-none group"
+        onClick={() => handleSort(column)}
+    >
+        <div className="flex items-center gap-1">
+            {label}
+            <SortIcon column={column} />
+        </div>
+    </th>
+  );
 
   return (
     <div className="min-h-screen pb-10">
@@ -170,12 +244,12 @@ const App: React.FC = () => {
           <div className="flex justify-between items-center">
             <div>
               <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-                <CheckCheck className="text-emerald-400" /> FiscalAudit Pro
+                <CheckCheck className="text-emerald-400" /> UniAudit Pro
               </h1>
               <p className="text-slate-400 text-sm mt-1">Ferramenta de Auditoria e Confronto Contábil x SEFAZ</p>
             </div>
             <div className="text-right hidden sm:block">
-              <span className="bg-slate-700 px-3 py-1 rounded text-xs font-mono text-slate-300">v2.1.0</span>
+              <span className="bg-slate-700 px-3 py-1 rounded text-xs font-mono text-slate-300">v2.2.0</span>
             </div>
           </div>
         </div>
@@ -205,17 +279,23 @@ const App: React.FC = () => {
                     onFileSelect={handleAccountingUpload}
                     fileName={accountingFileName}
                 />
-                <div className="text-xs text-gray-400 mt-2">
-                    Colunas esperadas: ChaveNFe, Numero, Valor, Data
+                <div className="text-xs text-gray-500 mt-2 bg-yellow-50 p-2 rounded border border-yellow-100">
+                    <strong>Importante:</strong> Na exportação selecione a opção: <em>Planilha com Cabeçalho</em>.
                 </div>
             </Card>
 
             {/* Step 2 */}
             <Card title="2. Arquivo(s) SEFAZ" subtitle="HTML Exportado do e-Fisco" icon={<ExternalLink size={20} />}>
                  <div className="mb-4">
-                    <a href="https://efisco.sefaz.pe.gov.br/" target="_blank" rel="noreferrer" className="text-blue-600 text-sm hover:underline flex items-center gap-1 mb-3">
-                        Acessar e-Fisco <ExternalLink size={12}/>
+                    <a 
+                        href="https://efisco.sefaz.pe.gov.br/" 
+                        target="_blank" 
+                        rel="noreferrer" 
+                        className="flex items-center justify-center gap-2 w-full bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100 hover:border-blue-300 font-medium py-2 px-4 rounded-lg transition-all mb-4 text-sm"
+                    >
+                        <ExternalLink size={16}/> Acessar e-Fisco (SEFAZ-PE)
                     </a>
+                    
                     <FileUpload 
                         label="Selecione o(s) arquivo(s) HTML" 
                         accept=".html,.htm" 
@@ -307,12 +387,12 @@ const App: React.FC = () => {
                         <table className="w-full text-sm text-left">
                             <thead className="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
                                 <tr>
-                                    <th className="px-6 py-3">Número</th>
-                                    <th className="px-6 py-3">Série</th>
-                                    <th className="px-6 py-3">Data</th>
-                                    <th className="px-6 py-3">Chave de Acesso</th>
-                                    <th className="px-6 py-3">Situação SEFAZ</th>
-                                    <th className="px-6 py-3">Status</th>
+                                    <ThSortable label="Número" column="numero" />
+                                    <ThSortable label="Série" column="serie" />
+                                    <ThSortable label="Data" column="data" />
+                                    <ThSortable label="Chave de Acesso" column="chave" />
+                                    <ThSortable label="Situação SEFAZ" column="situacaoSefaz" />
+                                    <ThSortable label="Status" column="status" />
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-100">
@@ -348,10 +428,10 @@ const App: React.FC = () => {
                     </div>
                     
                     {/* Pagination Footer */}
-                    {filteredResults.length > 0 && (
+                    {processedResults.length > 0 && (
                         <div className="p-4 bg-gray-50 border-t border-gray-200 flex flex-col md:flex-row items-center justify-between gap-4">
                             <div className="text-sm text-gray-600">
-                                Exibindo <strong>{startRecordIndex}</strong> a <strong>{endRecordIndex}</strong> de <strong>{filteredResults.length}</strong> resultados
+                                Exibindo <strong>{startRecordIndex}</strong> a <strong>{endRecordIndex}</strong> de <strong>{processedResults.length}</strong> resultados
                             </div>
                             
                             <div className="flex items-center gap-2">
