@@ -1,10 +1,35 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, CheckCheck, LayoutDashboard, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, LayoutDashboard, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { parseAccountingFile, parseSefazFiles } from './services/parser';
 import { exportToPdf } from './services/pdfService';
 import { AccountingRecord, SefazRecord, ComparisonResult, MatchStatus, SummaryStats } from './types';
 import { FileUpload, Button, Card, StatusBadge } from './components/ui';
 import { extractDateFromKey } from './utils';
+
+// Logo Component replicating the provided image (3x4 grid, skewed)
+const UnicontaLogo = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 260 180" fill="none" xmlns="http://www.w3.org/2000/svg" className={className}>
+    <g transform="skewX(-20)">
+        {/* Row 1 (Top) */}
+        <rect x="70" y="10" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="115" y="10" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="160" y="10" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="205" y="10" width="35" height="35" rx="4" fill="currentColor" />
+
+        {/* Row 2 (Middle) */}
+        <rect x="55" y="55" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="100" y="55" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="145" y="55" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="190" y="55" width="35" height="35" rx="4" fill="currentColor" />
+
+        {/* Row 3 (Bottom) */}
+        <rect x="40" y="100" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="85" y="100" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="130" y="100" width="35" height="35" rx="4" fill="currentColor" />
+        <rect x="175" y="100" width="35" height="35" rx="4" fill="currentColor" />
+    </g>
+  </svg>
+);
 
 type SortDirection = 'asc' | 'desc';
 
@@ -243,10 +268,13 @@ const App: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 py-6">
           <div className="flex justify-between items-center">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-                <CheckCheck className="text-emerald-400" /> UniAudit Pro
+              <h1 className="text-2xl font-bold tracking-tight flex items-center gap-3">
+                <UnicontaLogo className="h-8 w-auto text-white" />
+                <span>
+                  Confronta <span className="font-normal text-slate-300 ml-1">by Uniconta</span>
+                </span>
               </h1>
-              <p className="text-slate-400 text-sm mt-1">Ferramenta de Auditoria e Confronto Contábil x SEFAZ</p>
+              <p className="text-slate-400 text-sm mt-1 ml-1">Ferramenta de Auditoria e Confronto Contábil x SEFAZ</p>
             </div>
             <div className="text-right hidden sm:block">
               <span className="bg-slate-700 px-3 py-1 rounded text-xs font-mono text-slate-300">v2.2.0</span>
