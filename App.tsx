@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, LayoutDashboard, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { FileText, ExternalLink, Download, RefreshCw, AlertTriangle, LayoutDashboard, ChevronLeft, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, PlayCircle, X } from 'lucide-react';
 import { parseAccountingFile, parseSefazFiles } from './services/parser';
 import { exportToPdf } from './services/pdfService';
 import { AccountingRecord, SefazRecord, ComparisonResult, MatchStatus, SummaryStats } from './types';
@@ -58,6 +58,9 @@ const App: React.FC = () => {
   
   // Errors
   const [error, setError] = useState<string | null>(null);
+
+  // Tutorial Modal State
+  const [showTutorial, setShowTutorial] = useState(false);
 
   // Filters
   const [filterText, setFilterText] = useState('');
@@ -277,7 +280,7 @@ const App: React.FC = () => {
               <p className="text-slate-400 text-sm mt-1 ml-1">Ferramenta de Auditoria e Confronto Contábil x SEFAZ</p>
             </div>
             <div className="text-right hidden sm:block">
-              <span className="bg-slate-700 px-3 py-1 rounded text-xs font-mono text-slate-300">v2.2.0</span>
+              <span className="bg-slate-700 px-3 py-1 rounded text-xs font-mono text-slate-300">v2.3.0</span>
             </div>
           </div>
         </div>
@@ -301,6 +304,17 @@ const App: React.FC = () => {
             
             {/* Step 1 */}
             <Card title="1. Arquivo Contábil" subtitle="Excel (.xls, .xlsx, .csv)" icon={<FileText size={20} />}>
+                <div className="flex justify-between items-end mb-1">
+                    <span className="text-sm font-semibold text-gray-700 hidden">Upload</span>
+                    <button 
+                        onClick={() => setShowTutorial(true)} 
+                        className="text-xs font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors ml-auto mb-2"
+                    >
+                        <PlayCircle size={14} />
+                        Como exportar?
+                    </button>
+                </div>
+
                 <FileUpload 
                     label="Selecione a exportação do sistema" 
                     accept=".xls,.xlsx,.csv" 
@@ -500,6 +514,40 @@ const App: React.FC = () => {
             </div>
         )}
       </main>
+
+      {/* Tutorial Modal */}
+      {showTutorial && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]">
+             <div className="flex justify-between items-center p-4 border-b border-gray-100 bg-gray-50">
+                <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+                  <PlayCircle size={20} className="text-blue-600"/> Tutorial: Exportação do Sistema Contábil
+                </h3>
+                <button 
+                  onClick={() => setShowTutorial(false)} 
+                  className="text-gray-400 hover:text-gray-700 hover:bg-gray-100 p-1 rounded-full transition-colors"
+                >
+                   <X size={24} />
+                </button>
+             </div>
+             <div className="aspect-video w-full bg-black">
+                <iframe
+                   width="100%"
+                   height="100%"
+                   src="https://www.youtube.com/embed/o-h5nwPTQn8?autoplay=1"
+                   title="Tutorial Exportação"
+                   frameBorder="0"
+                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                   allowFullScreen
+                ></iframe>
+             </div>
+             <div className="p-4 text-sm text-gray-500 text-center bg-gray-50">
+                Siga os passos do vídeo para gerar o arquivo .XLS com cabeçalho correto.
+             </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
