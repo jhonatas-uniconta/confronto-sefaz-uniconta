@@ -8,7 +8,8 @@ import {
   sanitizeCNPJ,
   sanitizeIE,
   normalizeKey,
-  matchRazaoSocialInLine 
+  normalizeCompanyName,
+  extractRegistroPdf
 } from '../utils';
 
 // Configure worker for browser environment
@@ -349,29 +350,35 @@ export const processEditalPdf = async (
       // ========================================================
       // NÍVEL 3: CORRESPONDÊNCIA POR RAZÃO SOCIAL
       // ========================================================
-      // Verifica todos os clientes cuja Razão Social coincide com a linha
-      const razaoMatches = activeClients
-        .map(client => ({
-          client,
-          res: matchRazaoSocialInLine(client.razao_social, line)
-        }))
-        .filter(m => m.res.matched);
+      // A Razão Social só deve gerar correspondência quando for EXATAMENTE IGUAL após normalização.
+      // Sem aproximação / fuzzy / Levenshtein / contains / includes / palavras em comum.
+      // const clientName = normalizeCompanyName(cliente.razao_social);
+      // const pdfName = normalizeCompanyName(registroPdf.razao_social);
+      // A correspondência só deve ocorrer se: clientName === pdfName
+      const registroPdf = extractRegistroPdf(line);
+      const pdfName = normalizeCompanyName(registroPdf.razao_social);
 
-      if (razaoMatches.length > 0) {
+      if (pdfName && pdfName.length >= 3) {
+        const razaoMatches = activeClients.filter(client => {
+          const clientName = normalizeCompanyName(client.razao_social);
+          if (!clientName) return false;
+          return clientName === pdfName;
+        });
+
         if (razaoMatches.length === 1) {
-          // Correspondência única por Razão Social
+          // Correspondência única confirmada por Razão Social
           const single = razaoMatches[0];
-          const matchKey = `${file.name}-${page.pageNumber}-${single.client.id}`;
+          const matchKey = `${file.name}-${page.pageNumber}-${single.id}`;
           if (!processedMatches.has(matchKey)) {
             processedMatches.add(matchKey);
-            const cleanIE = sanitizeIE(single.client.inscricao_estadual);
+            const cleanIE = sanitizeIE(single.inscricao_estadual);
             matches.push({
               id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
-              clienteId: single.client.id,
-              cliente: single.client,
-              razaoSocial: single.client.razao_social,
-              razaoSocialPdf: single.client.razao_social,
-              cnpj: single.client.cnpj,
+              clienteId: single.id,
+              cliente: single,
+              razaoSocial: single.razao_social,
+              razaoSocialPdf: registroPdf.razao_social || single.razao_social,
+              cnpj: single.cnpj,
               inscricaoEstadual: cleanIE || undefined,
               inscricaoEstadualFormatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
               tipoEdital: tipoEdital,
@@ -380,22 +387,21 @@ export const processEditalPdf = async (
               pagina: page.pageNumber,
               trechoOriginal: snippet,
               dataProcessamento: new Date().toISOString(),
-              encontradoPor: single.res.level === 'strong' ? 'Razão Social' : 'Razão Social – conferir',
-              similaridade: single.res.score,
+              encontradoPor: 'Razão Social',
               situacaoVisual: getSituacaoVisual(tipoEdital)
             });
           }
-        } else {
-          // Múltiplos clientes com a mesma Razão Social sem CNPJ/IE identificador na linha:
+        } else if (razaoMatches.length > 1) {
+          // Múltiplos clientes com a mesma Razão Social exata cadastrados na base:
           // "Correspondência ambígua por Razão Social"
-          const candidateClients = razaoMatches.map(m => m.client);
-          const groupKey = `${file.name}-${page.pageNumber}-ambiguo-${razaoMatches[0].client.razao_social}`;
+          const candidateClients = razaoMatches;
+          const groupKey = `${file.name}-${page.pageNumber}-ambiguo-${pdfName}`;
           if (!processedMatches.has(groupKey)) {
             processedMatches.add(groupKey);
             matches.push({
               id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
               razaoSocial: candidateClients[0].razao_social,
-              razaoSocialPdf: candidateClients[0].razao_social,
+              razaoSocialPdf: registroPdf.razao_social || candidateClients[0].razao_social,
               clientesCandidatos: candidateClients,
               tipoEdital: tipoEdital,
               numeroEdital: numeroEdital,
@@ -404,7 +410,6 @@ export const processEditalPdf = async (
               trechoOriginal: snippet,
               dataProcessamento: new Date().toISOString(),
               encontradoPor: 'Correspondência ambígua por Razão Social',
-              similaridade: razaoMatches[0].res.score,
               situacaoVisual: {
                 texto: 'Correspondência ambígua por Razão Social',
                 tipo: 'warning',

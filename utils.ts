@@ -72,144 +72,98 @@ export const formatIE = (ie: string | null | undefined): string => {
 };
 
 /**
- * Normalizes a company name (Razão Social) for precise comparison.
- * - Uppercase
- * - Removes accents
- * - Removes punctuation, hyphens, slashes, special symbols
- * - Collapses multiple spaces and trims
- * Example: "OLIVEIRAS BEM-ESTAR ALIMENTOS LTDA - EPP" -> "OLIVEIRAS BEM ESTAR ALIMENTOS LTDA EPP"
+ * Normalizes a company name (Razão Social) according to exact normalization rules:
+ * 1. Converte para maiúsculas
+ * 2. Remove acentos
+ * 3. Remove pontos
+ * 4. Remove vírgulas
+ * 5. Remove hífens
+ * 6. Remove barras
+ * 7. Remove caracteres especiais
+ * 8. Substitui múltiplos espaços por um único espaço
+ * 9. Remove espaços no início e final
+ *
+ * Exemplo:
+ * "L. C. COMÉRCIO E SERVIÇOS LTDA" -> "L C COMERCIO E SERVICOS LTDA"
  */
-export const normalizeRazaoSocial = (text: string | null | undefined): string => {
+export function normalizeCompanyName(text?: string | null): string {
   if (!text) return '';
+
   return text
     .toString()
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9\s]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-};
+    .replace(/[\u0300-\u036f]/g, '') // 2. Remove acentos
+    .toUpperCase()                   // 1. Converte para maiúsculas
+    .replace(/[^A-Z0-9]/g, ' ')      // 3, 4, 5, 6, 7. Remove pontos, vírgulas, hífens, barras, caracteres especiais
+    .replace(/\s+/g, ' ')            // 8. Substitui múltiplos espaços por um único espaço
+    .trim();                         // 9. Remove espaços no início e final
+}
 
-/**
- * Calculates Levenshtein distance between two strings
- */
-export const levenshteinDistance = (a: string, b: string): number => {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
+/** Alias for compatibility */
+export const normalizeRazaoSocial = normalizeCompanyName;
 
-  const row = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    let prev = i;
-    for (let j = 1; j <= b.length; j++) {
-      const val = a[i - 1] === b[j - 1] ? row[j - 1] : Math.min(row[j - 1], prev, row[j]) + 1;
-      row[j - 1] = prev;
-      prev = val;
-    }
-    row[b.length] = prev;
-  }
-  return row[b.length];
-};
-
-/**
- * Calculates similarity score (0.0 to 1.0) between two normalized strings
- */
-export const stringSimilarity = (str1: string, str2: string): number => {
-  const s1 = normalizeRazaoSocial(str1);
-  const s2 = normalizeRazaoSocial(str2);
-  if (!s1 || !s2) return 0;
-  if (s1 === s2) return 1.0;
-
-  const maxLen = Math.max(s1.length, s2.length);
-  if (maxLen === 0) return 1.0;
-
-  const dist = levenshteinDistance(s1, s2);
-  return Math.max(0, 1 - dist / maxLen);
-};
-
-export interface RazaoSocialMatchResult {
-  matched: boolean;
-  score: number;
-  level: 'strong' | 'review' | 'none';
-  matchedSnippet?: string;
+export interface RegistroPdf {
+  inscricao_estadual?: string;
+  cnpj?: string;
+  razao_social: string;
+  rawLine: string;
 }
 
 /**
- * Compares client's corporate name against a line from the PDF.
- * Checks for:
- * 1. Exact inclusion of the full normalized name (score: 1.0 -> 'strong')
- * 2. Sliding window of words for minor spelling differences/abbreviations (similarity >= 0.95 -> 'strong', >= 0.85 -> 'review')
+ * Extracts candidate registration data (IE, CNPJ, Razão Social) from a line in the SEFAZ PDF.
+ * Removes recognized IE, CNPJ, dates, currency and municipality/UF suffixes from the line,
+ * leaving the raw company name.
  */
-export const matchRazaoSocialInLine = (
-  clientRazao: string,
-  lineText: string
-): RazaoSocialMatchResult => {
-  const normClient = normalizeRazaoSocial(clientRazao);
-  const normLine = normalizeRazaoSocial(lineText);
+export function extractRegistroPdf(line: string): RegistroPdf {
+  let cleaned = line.trim();
 
-  if (!normClient || !normLine || normClient.length < 4) {
-    return { matched: false, score: 0, level: 'none' };
+  // 1. Remove initial sequence/item numbering (e.g. "01 - ", "1. ", "Item 10: ")
+  cleaned = cleaned.replace(/^\s*\d+[\.\-\)]\s*/, '');
+  cleaned = cleaned.replace(/^ITEM\s*\d+[\.\:\-]?\s*/i, '');
+
+  // 2. Extract and remove Inscrição Estadual (9 digits: e.g. "0369429-10" or "036942910", or 14 digits)
+  let extractedIE: string | undefined;
+  const ieRegex = /\b(\d{7}[-\s]?\d{2}|\d{2}\.\d\.\d{3}\.\d{7}-\d|\d{9})\b/;
+  const ieMatch = cleaned.match(ieRegex);
+  if (ieMatch) {
+    extractedIE = ieMatch[0];
+    cleaned = cleaned.replace(ieMatch[0], ' ');
   }
 
-  // 1. Exact match or full phrase containment
-  if (normLine === normClient || normLine.includes(normClient)) {
-    return {
-      matched: true,
-      score: 1.0,
-      level: 'strong',
-      matchedSnippet: clientRazao
-    };
-  }
-
-  // 2. Sliding window of words in the line
-  const clientWords = normClient.split(' ').filter(w => w.length > 0);
-  const lineWords = normLine.split(' ').filter(w => w.length > 0);
-
-  if (lineWords.length === 0 || clientWords.length === 0) {
-    return { matched: false, score: 0, level: 'none' };
-  }
-
-  let bestScore = 0;
-  let bestSnippet = '';
-
-  // Test window sizes: [clientWords.length - 1, clientWords.length, clientWords.length + 1]
-  const minW = Math.max(1, clientWords.length - 1);
-  const maxW = Math.min(lineWords.length, clientWords.length + 2);
-
-  for (let wLen = minW; wLen <= maxW; wLen++) {
-    for (let i = 0; i <= lineWords.length - wLen; i++) {
-      const windowStr = lineWords.slice(i, i + wLen).join(' ');
-      const sim = stringSimilarity(normClient, windowStr);
-      if (sim > bestScore) {
-        bestScore = sim;
-        bestSnippet = windowStr;
-      }
+  // 3. Extract and remove CNPJ (e.g. "10.316.742/0001-85", "10316742000185", "10.316.742") or CPF
+  let extractedCNPJ: string | undefined;
+  const cnpjRegex = /\b(\d{2}\.\d{3}\.\d{3}\/\d{4}-\d{2}|\d{14}|\d{2}\.\d{3}\.\d{3})\b/;
+  const cnpjMatch = cleaned.match(cnpjRegex);
+  if (cnpjMatch) {
+    extractedCNPJ = cnpjMatch[0];
+    cleaned = cleaned.replace(cnpjMatch[0], ' ');
+  } else {
+    const cpfRegex = /\b\d{3}\.\d{3}\.\d{3}-\d{2}\b/;
+    const cpfMatch = cleaned.match(cpfRegex);
+    if (cpfMatch) {
+      extractedCNPJ = cpfMatch[0];
+      cleaned = cleaned.replace(cpfMatch[0], ' ');
     }
   }
 
-  // Thresholds per user instructions:
-  // >= 95%: Strong match ("Razão Social")
-  // 85% a 94%: Possible match ("Razão Social – conferir")
-  // < 85%: Not a match
-  if (bestScore >= 0.95) {
-    return {
-      matched: true,
-      score: bestScore,
-      level: 'strong',
-      matchedSnippet: bestSnippet
-    };
-  } else if (bestScore >= 0.85) {
-    return {
-      matched: true,
-      score: bestScore,
-      level: 'review',
-      matchedSnippet: bestSnippet
-    };
-  }
+  // 4. Remove debt amounts e.g. "R$ 1.234,56" or dates
+  cleaned = cleaned.replace(/R\$\s*[\d\.\,]+/gi, ' ');
+  cleaned = cleaned.replace(/\b\d{2}\/\d{2}\/\d{4}\b/g, ' ');
 
-  return { matched: false, score: bestScore, level: 'none' };
-};
+  // 5. Remove municipality / UF from end of line (e.g. "CARUARU-PE", "RECIFE - PE", "RECIFE/PE", "- PE", " PE")
+  cleaned = cleaned.replace(/(?:\s+[-/]\s*|\s+)[A-ZÀ-Úa-z\s]+[-/]\s*(?:PE|AL|PB|BA|RN|CE|SE|PI|MA|SP|RJ|MG|ES|PR|SC|RS|MS|MT|GO|DF|TO|PA|AM|RO|AC|RR|AP)\s*$/i, ' ');
+  cleaned = cleaned.replace(/[-/]\s*[A-Z]{2}\s*$/i, ' ');
+  cleaned = cleaned.replace(/\s+[A-Z]{2}\s*$/i, ' ');
+
+  const razao = cleaned.replace(/\s+/g, ' ').trim();
+
+  return {
+    inscricao_estadual: extractedIE,
+    cnpj: extractedCNPJ,
+    razao_social: razao,
+    rawLine: line
+  };
+}
 
 
 /**
