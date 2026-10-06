@@ -64,6 +64,11 @@ export const getMetodoBadge = (metodo: MetodoIdentificacao): { cor: string; text
         cor: 'bg-orange-50 text-orange-800 border-orange-300',
         texto: 'Razão Social – conferir'
       };
+    case 'Correspondência ambígua por Razão Social':
+      return {
+        cor: 'bg-purple-50 text-purple-800 border-purple-300',
+        texto: 'Correspondência ambígua por Razão Social'
+      };
   }
 };
 
@@ -265,65 +270,29 @@ export const processEditalPdf = async (
 
     for (const line of page.lines) {
       const lineCleanDigits = normalizeKey(line);
+      const snippet = line.trim();
 
-      for (const client of activeClients) {
-        const matchKey = `${file.name}-${page.pageNumber}-${client.id}`;
-        if (processedMatches.has(matchKey)) continue;
+      // ========================================================
+      // NÍVEL 1: CORRESPONDÊNCIA CONFIRMADA POR CNPJ
+      // ========================================================
+      const clientMatchedByCnpj = activeClients.find(client => {
+        const clientCleanCNPJ = sanitizeCNPJ(client.cnpj);
+        if (!clientCleanCNPJ || clientCleanCNPJ.length < 11) return false;
+        return lineCleanDigits.includes(clientCleanCNPJ) || line.includes(formatCNPJ(clientCleanCNPJ));
+      });
 
-        let matched = false;
-        let metodo: MetodoIdentificacao = 'Inscrição Estadual';
-        let similarityScore: number | undefined = undefined;
-
-        // ========================================================
-        // NÍVEL 1: CORRESPONDÊNCIA CONFIRMADA POR CNPJ
-        // ========================================================
-        const clientCleanCNPJ = normalizeCNPJ(client.cnpj);
-        if (clientCleanCNPJ && clientCleanCNPJ.length >= 11) {
-          if (lineCleanDigits.includes(clientCleanCNPJ) || line.includes(formatCNPJ(clientCleanCNPJ))) {
-            matched = true;
-            metodo = 'CNPJ';
-          }
-        }
-
-        // ========================================================
-        // NÍVEL 2: CORRESPONDÊNCIA CONFIRMADA POR INSCRIÇÃO ESTADUAL
-        // ========================================================
-        if (!matched && client.inscricao_estadual) {
-          const clientCleanIE = normalizeIE(client.inscricao_estadual);
-          if (clientCleanIE) {
-            const formattedIE = formatIE(clientCleanIE);
-            if (line.includes(formattedIE) || lineCleanDigits.includes(clientCleanIE)) {
-              matched = true;
-              metodo = 'Inscrição Estadual';
-            }
-          }
-        }
-
-        // ========================================================
-        // NÍVEL 3: CORRESPONDÊNCIA POR RAZÃO SOCIAL
-        // ========================================================
-        if (!matched && client.razao_social) {
-          const matchResult = matchRazaoSocialInLine(client.razao_social, line);
-          if (matchResult.matched) {
-            matched = true;
-            similarityScore = matchResult.score;
-            metodo = matchResult.level === 'strong' ? 'Razão Social' : 'Razão Social – conferir';
-          }
-        }
-
-        if (matched) {
+      if (clientMatchedByCnpj) {
+        const matchKey = `${file.name}-${page.pageNumber}-${clientMatchedByCnpj.id}`;
+        if (!processedMatches.has(matchKey)) {
           processedMatches.add(matchKey);
-
-          const snippet = line.trim();
-          const cleanIE = normalizeIE(client.inscricao_estadual);
-
+          const cleanIE = sanitizeIE(clientMatchedByCnpj.inscricao_estadual);
           matches.push({
             id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
-            clienteId: client.id,
-            cliente: client,
-            razaoSocial: client.razao_social,
-            razaoSocialPdf: client.razao_social,
-            cnpj: client.cnpj,
+            clienteId: clientMatchedByCnpj.id,
+            cliente: clientMatchedByCnpj,
+            razaoSocial: clientMatchedByCnpj.razao_social,
+            razaoSocialPdf: clientMatchedByCnpj.razao_social,
+            cnpj: clientMatchedByCnpj.cnpj,
             inscricaoEstadual: cleanIE || undefined,
             inscricaoEstadualFormatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
             tipoEdital: tipoEdital,
@@ -332,10 +301,115 @@ export const processEditalPdf = async (
             pagina: page.pageNumber,
             trechoOriginal: snippet,
             dataProcessamento: new Date().toISOString(),
-            encontradoPor: metodo,
-            similaridade: similarityScore,
+            encontradoPor: 'CNPJ',
             situacaoVisual: getSituacaoVisual(tipoEdital)
           });
+        }
+        continue; // CNPJ matched, next line
+      }
+
+      // ========================================================
+      // NÍVEL 2: CORRESPONDÊNCIA CONFIRMADA POR INSCRIÇÃO ESTADUAL
+      // ========================================================
+      const clientMatchedByIE = activeClients.find(client => {
+        const clientCleanIE = sanitizeIE(client.inscricao_estadual);
+        if (!clientCleanIE) return false;
+        return line.includes(formatIE(clientCleanIE)) || lineCleanDigits.includes(clientCleanIE);
+      });
+
+      if (clientMatchedByIE) {
+        const matchKey = `${file.name}-${page.pageNumber}-${clientMatchedByIE.id}`;
+        if (!processedMatches.has(matchKey)) {
+          processedMatches.add(matchKey);
+          const cleanIE = sanitizeIE(clientMatchedByIE.inscricao_estadual);
+          matches.push({
+            id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
+            clienteId: clientMatchedByIE.id,
+            cliente: clientMatchedByIE,
+            razaoSocial: clientMatchedByIE.razao_social,
+            razaoSocialPdf: clientMatchedByIE.razao_social,
+            cnpj: clientMatchedByIE.cnpj,
+            inscricaoEstadual: cleanIE || undefined,
+            inscricaoEstadualFormatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
+            tipoEdital: tipoEdital,
+            numeroEdital: numeroEdital,
+            arquivo: file.name,
+            pagina: page.pageNumber,
+            trechoOriginal: snippet,
+            dataProcessamento: new Date().toISOString(),
+            encontradoPor: 'Inscrição Estadual',
+            situacaoVisual: getSituacaoVisual(tipoEdital)
+          });
+        }
+        continue; // IE matched, next line
+      }
+
+      // ========================================================
+      // NÍVEL 3: CORRESPONDÊNCIA POR RAZÃO SOCIAL
+      // ========================================================
+      // Verifica todos os clientes cuja Razão Social coincide com a linha
+      const razaoMatches = activeClients
+        .map(client => ({
+          client,
+          res: matchRazaoSocialInLine(client.razao_social, line)
+        }))
+        .filter(m => m.res.matched);
+
+      if (razaoMatches.length > 0) {
+        if (razaoMatches.length === 1) {
+          // Correspondência única por Razão Social
+          const single = razaoMatches[0];
+          const matchKey = `${file.name}-${page.pageNumber}-${single.client.id}`;
+          if (!processedMatches.has(matchKey)) {
+            processedMatches.add(matchKey);
+            const cleanIE = sanitizeIE(single.client.inscricao_estadual);
+            matches.push({
+              id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
+              clienteId: single.client.id,
+              cliente: single.client,
+              razaoSocial: single.client.razao_social,
+              razaoSocialPdf: single.client.razao_social,
+              cnpj: single.client.cnpj,
+              inscricaoEstadual: cleanIE || undefined,
+              inscricaoEstadualFormatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
+              tipoEdital: tipoEdital,
+              numeroEdital: numeroEdital,
+              arquivo: file.name,
+              pagina: page.pageNumber,
+              trechoOriginal: snippet,
+              dataProcessamento: new Date().toISOString(),
+              encontradoPor: single.res.level === 'strong' ? 'Razão Social' : 'Razão Social – conferir',
+              similaridade: single.res.score,
+              situacaoVisual: getSituacaoVisual(tipoEdital)
+            });
+          }
+        } else {
+          // Múltiplos clientes com a mesma Razão Social sem CNPJ/IE identificador na linha:
+          // "Correspondência ambígua por Razão Social"
+          const candidateClients = razaoMatches.map(m => m.client);
+          const groupKey = `${file.name}-${page.pageNumber}-ambiguo-${razaoMatches[0].client.razao_social}`;
+          if (!processedMatches.has(groupKey)) {
+            processedMatches.add(groupKey);
+            matches.push({
+              id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
+              razaoSocial: candidateClients[0].razao_social,
+              razaoSocialPdf: candidateClients[0].razao_social,
+              clientesCandidatos: candidateClients,
+              tipoEdital: tipoEdital,
+              numeroEdital: numeroEdital,
+              arquivo: file.name,
+              pagina: page.pageNumber,
+              trechoOriginal: snippet,
+              dataProcessamento: new Date().toISOString(),
+              encontradoPor: 'Correspondência ambígua por Razão Social',
+              similaridade: razaoMatches[0].res.score,
+              situacaoVisual: {
+                texto: 'Correspondência ambígua por Razão Social',
+                tipo: 'warning',
+                cor: 'bg-purple-50 text-purple-800 border-purple-300'
+              }
+            });
+          }
         }
       }
     }

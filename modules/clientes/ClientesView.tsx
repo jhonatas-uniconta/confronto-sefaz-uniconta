@@ -713,26 +713,54 @@ export const ClientesView: React.FC = () => {
           {/* Step 3: Preview & Confirm */}
           {importStep === 'preview' && importSummary && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
-                <div className="p-3 bg-gray-50 rounded-lg border border-gray-200">
-                  <span className="text-xs text-gray-500 block">Total Lido</span>
-                  <span className="text-xl font-bold text-gray-800">{importSummary.total}</span>
-                </div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-center">
                 <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200">
-                  <span className="text-xs text-emerald-600 block">Novos Clientes</span>
-                  <span className="text-xl font-bold text-emerald-700">{importSummary.novos}</span>
+                  <span className="text-[11px] text-emerald-700 block font-medium">Novos Clientes</span>
+                  <span className="text-xl font-bold text-emerald-800">{importSummary.novos}</span>
                 </div>
                 <div className="p-3 bg-blue-50 rounded-lg border border-blue-200">
-                  <span className="text-xs text-blue-600 block">Já Cadastrados</span>
-                  <span className="text-xl font-bold text-blue-700">{importSummary.existentes}</span>
+                  <span className="text-[11px] text-blue-700 block font-medium">Existentes por CNPJ</span>
+                  <span className="text-xl font-bold text-blue-800">{importSummary.existentesCnpj}</span>
                 </div>
-                <div className="p-3 bg-red-50 rounded-lg border border-red-200">
-                  <span className="text-xs text-red-600 block">Registros com Erro</span>
-                  <span className="text-xl font-bold text-red-700">{importSummary.erros}</span>
+                <div className="p-3 bg-indigo-50 rounded-lg border border-indigo-200">
+                  <span className="text-[11px] text-indigo-700 block font-medium">Existentes por IE</span>
+                  <span className="text-xl font-bold text-indigo-800">{importSummary.existentesIe}</span>
+                </div>
+                <div className={`p-3 rounded-lg border ${
+                  importSummary.duplicidadesArquivo > 0 
+                    ? 'bg-amber-50 border-amber-200 text-amber-800' 
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}>
+                  <span className="text-[11px] block font-medium">Duplicidades no Arquivo</span>
+                  <span className="text-xl font-bold">{importSummary.duplicidadesArquivo}</span>
+                </div>
+                <div className={`p-3 rounded-lg border ${
+                  importSummary.erros > 0 
+                    ? 'bg-red-50 border-red-200 text-red-800' 
+                    : 'bg-slate-50 border-slate-200 text-slate-700'
+                }`}>
+                  <span className="text-[11px] block font-medium">Registros Inválidos</span>
+                  <span className="text-xl font-bold">{importSummary.erros}</span>
                 </div>
               </div>
 
-              {/* Duplicate or Error Warnings */}
+              {/* Duplicates inside file notice */}
+              {importSummary.duplicidadesDescricao && importSummary.duplicidadesDescricao.length > 0 && (
+                <div className="bg-amber-50 p-3 rounded-lg border border-amber-200 text-xs text-amber-800 space-y-1">
+                  <span className="font-bold block flex items-center gap-1.5">
+                    <AlertTriangle size={14} className="text-amber-600" />
+                    Duplicidades identificadas dentro da própria planilha:
+                  </span>
+                  {importSummary.duplicidadesDescricao.map((dup, i) => (
+                    <div key={i}>• {dup}</div>
+                  ))}
+                  <p className="text-[11px] text-amber-700 mt-1 italic">
+                    * Linhas repetidas com o mesmo CNPJ ou IE no arquivo não serão importadas em duplicidade.
+                  </p>
+                </div>
+              )}
+
+              {/* Error Warnings */}
               {importSummary.errosDescricao.length > 0 && (
                 <div className="bg-red-50 p-3 rounded-lg border border-red-200 text-xs text-red-800 space-y-1">
                   <span className="font-bold block">Inconsistências encontradas:</span>
@@ -753,7 +781,7 @@ export const ClientesView: React.FC = () => {
                     onChange={() => setUpdateExisting(true)}
                     className="text-blue-600"
                   />
-                  <span><strong>Atualizar dados</strong> dos clientes existentes com as informações da planilha</span>
+                  <span><strong>Atualizar dados</strong> dos clientes existentes (identificados por CNPJ ou IE)</span>
                 </label>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input

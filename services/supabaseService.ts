@@ -13,19 +13,33 @@ export const SUPABASE_SQL_SCRIPT = `-- =========================================
 CREATE TABLE IF NOT EXISTS public.clientes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     codigo VARCHAR(50),
-    cnpj VARCHAR(20),
-    inscricao_estadual VARCHAR(20) NOT NULL,
-    razao_social VARCHAR(255) NOT NULL,
+    cnpj VARCHAR(20),                     -- Opcional
+    inscricao_estadual VARCHAR(20),       -- Opcional (sem NOT NULL)
+    razao_social VARCHAR(255) NOT NULL,    -- Obrigatória, PODE REPETIR (sem UNIQUE)
     nome_fantasia VARCHAR(255),
     ativo BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Índices para busca rápida e unicidade
-CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_ie ON public.clientes (inscricao_estadual);
-CREATE INDEX IF NOT EXISTS idx_clientes_cnpj ON public.clientes (cnpj);
+-- Ajuste de constraints caso a tabela já tenha sido criada anteriormente:
+ALTER TABLE public.clientes ALTER COLUMN inscricao_estadual DROP NOT NULL;
+DROP INDEX IF EXISTS idx_clientes_razao_unique;
+DROP INDEX IF EXISTS idx_clientes_ie;
+
+-- Índices de performance e regras de unicidade:
+-- A) Razão Social: índice de busca (NÃO possui restrição UNIQUE, permitindo repetições)
 CREATE INDEX IF NOT EXISTS idx_clientes_razao ON public.clientes (razao_social);
+
+-- B) CNPJ: Único quando preenchido (impede duplicidade quando presente, permite nulos)
+CREATE UNIQUE INDEX IF NOT EXISTS clientes_cnpj_unique
+ON public.clientes (cnpj)
+WHERE cnpj IS NOT NULL AND cnpj <> '';
+
+-- C) Inscrição Estadual: Única quando preenchida (impede duplicidade quando presente, permite nulos)
+CREATE UNIQUE INDEX IF NOT EXISTS clientes_ie_unique
+ON public.clientes (inscricao_estadual)
+WHERE inscricao_estadual IS NOT NULL AND inscricao_estadual <> '';
 
 -- 2. TABELA DE CONSULTAS / HISTÓRICO DE EDITAIS
 CREATE TABLE IF NOT EXISTS public.consultas_editais (

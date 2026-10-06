@@ -1,9 +1,10 @@
 import { Cliente } from '../types';
-import { normalizeIE, formatIE, normalizeCNPJ, formatCNPJ, normalizeRazaoSocial } from '../utils';
+import { normalizeIE, formatIE, normalizeCNPJ, formatCNPJ, sanitizeCNPJ, sanitizeIE } from '../utils';
 
 const STORAGE_KEY = 'uniconta_clientes_v1';
 
-// Seed sample clients with realistic Pernambuco data, including clients with and without IE:
+// Seed sample clients with realistic Pernambuco data, including clients with and without IE,
+// as well as multiple clients sharing the same Razão Social with different CNPJs:
 const DEFAULT_CLIENTS: Cliente[] = [
   {
     id: 'cli-001',
@@ -72,7 +73,7 @@ const DEFAULT_CLIENTS: Cliente[] = [
     inscricao_estadual: '',
     inscricao_estadual_formatada: 'Sem IE',
     razao_social: 'INDUSTRIA METALURGICA DO VALE LTDA',
-    nome_fantasia: 'METALVALE',
+    nome_fantasia: 'METALVALE MATRIZ',
     ativo: true,
     created_at: '2026-02-10T16:00:00.000Z',
     updated_at: '2026-02-10T16:00:00.000Z'
@@ -80,6 +81,18 @@ const DEFAULT_CLIENTS: Cliente[] = [
   {
     id: 'cli-007',
     codigo: '1007',
+    cnpj: '18.765.432/0002-92',
+    inscricao_estadual: '',
+    inscricao_estadual_formatada: 'Sem IE',
+    razao_social: 'INDUSTRIA METALURGICA DO VALE LTDA', // Mesma Razão Social, CNPJ diferente permitido!
+    nome_fantasia: 'METALVALE FILIAL',
+    ativo: true,
+    created_at: '2026-02-10T16:30:00.000Z',
+    updated_at: '2026-02-10T16:30:00.000Z'
+  },
+  {
+    id: 'cli-008',
+    codigo: '1008',
     cnpj: '12.345.678/0001-90',
     inscricao_estadual: '',
     inscricao_estadual_formatada: 'Sem IE',
@@ -120,12 +133,15 @@ export const saveClientsToStorage = (clients: Cliente[]): void => {
 /**
  * Validates a client candidate.
  * Mandatory fields: Razão Social.
- * Optional fields: Inscrição Estadual, CNPJ, Código, Nome Fantasia.
+ * Optional fields: CNPJ, Inscrição Estadual, Código, Nome Fantasia.
  *
- * Duplicate check order:
- * 1. CNPJ igual (quando preenchido com dígitos válidos)
- * 2. IE igual (quando ambos possuírem IE preenchida)
- * 3. Razão Social normalizada igual
+ * Duplication rules:
+ * 1. Razão Social: PODE REPETIR! Não bloqueia cadastro, edição nem importação.
+ * 2. CNPJ: NÃO PODE REPETIR quando preenchido. Se outro cliente tiver o mesmo CNPJ normalizado, bloqueia com:
+ *    “Já existe um cliente cadastrado com este CNPJ.”
+ *    Na edição, exclui o próprio registro para permitir manter o mesmo CNPJ.
+ * 3. Inscrição Estadual: NÃO PODE REPETIR quando preenchida. Se outro cliente tiver a mesma IE normalizada, bloqueia com:
+ *    “Já existe um cliente cadastrado com esta Inscrição Estadual.”
  */
 export const validateClient = (
   candidate: Partial<Cliente>,
@@ -136,39 +152,29 @@ export const validateClient = (
     return 'A Razão Social é obrigatória.';
   }
 
-  // 1. Check duplicate CNPJ if provided
-  const cleanCNPJ = normalizeCNPJ(candidate.cnpj);
+  // 1. Validar unicidade de CNPJ (quando preenchido)
+  const cleanCNPJ = sanitizeCNPJ(candidate.cnpj);
   if (cleanCNPJ && cleanCNPJ.length >= 11) {
     const dupCNPJ = existingClients.find(
-      c => c.id !== currentId && normalizeCNPJ(c.cnpj) === cleanCNPJ
+      c => c.id !== currentId && sanitizeCNPJ(c.cnpj) === cleanCNPJ
     );
     if (dupCNPJ) {
-      return `Já existe um cliente cadastrado com este CNPJ (${formatCNPJ(cleanCNPJ)}: ${dupCNPJ.razao_social}).`;
+      return 'Já existe um cliente cadastrado com este CNPJ.';
     }
   }
 
-  // 2. Check duplicate IE only if provided
-  const cleanIE = normalizeIE(candidate.inscricao_estadual);
+  // 2. Validar unicidade de Inscrição Estadual (quando preenchida)
+  const cleanIE = sanitizeIE(candidate.inscricao_estadual);
   if (cleanIE) {
     const dupIE = existingClients.find(
-      c => c.id !== currentId && c.inscricao_estadual && normalizeIE(c.inscricao_estadual) === cleanIE
+      c => c.id !== currentId && c.inscricao_estadual && sanitizeIE(c.inscricao_estadual) === cleanIE
     );
     if (dupIE) {
-      return `Já existe um cliente cadastrado com esta Inscrição Estadual (${formatIE(cleanIE)}: ${dupIE.razao_social}).`;
+      return 'Já existe um cliente cadastrado com esta Inscrição Estadual.';
     }
   }
 
-  // 3. Check duplicate normalized corporate name
-  const normCandRazao = normalizeRazaoSocial(candidate.razao_social);
-  if (normCandRazao) {
-    const dupRazao = existingClients.find(
-      c => c.id !== currentId && normalizeRazaoSocial(c.razao_social) === normCandRazao
-    );
-    if (dupRazao) {
-      return `Já existe um cliente cadastrado com esta Razão Social: "${dupRazao.razao_social}".`;
-    }
-  }
-
+  // 3. Razão Social: PODE SER DUPLICADA. Sem bloqueio!
   return null;
 };
 
@@ -189,7 +195,8 @@ export const createOrUpdateClient = (
     return { success: false, error };
   }
 
-  const cleanIE = normalizeIE(clientData.inscricao_estadual);
+  const cleanIE = sanitizeIE(clientData.inscricao_estadual);
+  const cleanCNPJ = sanitizeCNPJ(clientData.cnpj);
   const now = new Date().toISOString();
 
   if (clientData.id) {
@@ -201,7 +208,7 @@ export const createOrUpdateClient = (
     const updated: Cliente = {
       ...currentList[index],
       codigo: clientData.codigo?.trim() || currentList[index].codigo,
-      cnpj: clientData.cnpj ? formatCNPJ(clientData.cnpj) : currentList[index].cnpj,
+      cnpj: cleanCNPJ ? formatCNPJ(cleanCNPJ) : '',
       inscricao_estadual: cleanIE || '',
       inscricao_estadual_formatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
       razao_social: clientData.razao_social.trim().toUpperCase(),
@@ -217,7 +224,7 @@ export const createOrUpdateClient = (
     const newClient: Cliente = {
       id: 'cli-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 5),
       codigo: clientData.codigo?.trim() || '',
-      cnpj: clientData.cnpj ? formatCNPJ(clientData.cnpj) : '',
+      cnpj: cleanCNPJ ? formatCNPJ(cleanCNPJ) : '',
       inscricao_estadual: cleanIE || '',
       inscricao_estadual_formatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
       razao_social: clientData.razao_social.trim().toUpperCase(),

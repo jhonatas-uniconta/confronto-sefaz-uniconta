@@ -168,30 +168,23 @@ export const parseClientSpreadsheet = async (file: File): Promise<ParsedSpreadsh
  * Finds an existing client matching candidate according to priority:
  * 1. CNPJ igual (quando preenchido com >= 11 dígitos)
  * 2. IE igual (quando ambos possuírem IE preenchida)
- * 3. Razão Social normalizada igual
+ * (Razão Social NÃO é utilizada para identificar duplicidade ou matching)
  */
 const findMatchingExistingClient = (
   cnpj: string,
   ie: string,
-  razaoNorm: string,
   existingClients: Cliente[]
-): Cliente | undefined => {
+): { match: Cliente; por: 'CNPJ' | 'IE' } | undefined => {
   // 1. Match by CNPJ
   if (cnpj && cnpj.length >= 11) {
     const matchCNPJ = existingClients.find(c => c.cnpj && normalizeCNPJ(c.cnpj) === cnpj);
-    if (matchCNPJ) return matchCNPJ;
+    if (matchCNPJ) return { match: matchCNPJ, por: 'CNPJ' };
   }
 
   // 2. Match by IE (only if candidate has IE)
   if (ie) {
     const matchIE = existingClients.find(c => c.inscricao_estadual && normalizeIE(c.inscricao_estadual) === ie);
-    if (matchIE) return matchIE;
-  }
-
-  // 3. Match by normalized Razão Social
-  if (razaoNorm) {
-    const matchRazao = existingClients.find(c => normalizeRazaoSocial(c.razao_social) === razaoNorm);
-    if (matchRazao) return matchRazao;
+    if (matchIE) return { match: matchIE, por: 'IE' };
   }
 
   return undefined;
@@ -199,9 +192,9 @@ const findMatchingExistingClient = (
 
 /**
  * Analyzes and validates records based on mappings before confirming import.
- * Razão Social: Obrigatória.
- * IE: Opcional. Linhas sem IE NÃO geram erro.
- * CNPJ: Opcional, recomendado.
+ * - Razão Social: Obrigatória, PODE REPETIR (não impede importação e não é tratada como erro/duplicidade).
+ * - CNPJ: Opcional, NÃO pode repetir dentro do arquivo nem na base.
+ * - IE: Opcional, NÃO pode repetir dentro do arquivo nem na base.
  */
 export const analyzeImport = (
   rows: any[],
@@ -214,26 +207,31 @@ export const analyzeImport = (
   const cnpjIndex = headers.indexOf(mappings.find(m => m.campoDestino === 'cnpj')?.colunaPlanilha || '');
 
   let novos = 0;
+  let existentesCnpj = 0;
+  let existentesIe = 0;
   let existentes = 0;
   let erros = 0;
   let duplicidadesArquivo = 0;
   const errosDescricao: string[] = [];
+  const duplicidadesDescricao: string[] = [];
 
   if (razaoIndex === -1) {
     return {
       total: rows.length,
       novos: 0,
+      existentesCnpj: 0,
+      existentesIe: 0,
       existentes: 0,
       duplicidadesArquivo: 0,
+      duplicidadesDescricao: [],
       erros: rows.length,
       errosDescricao: ['A coluna para "Razão Social" não foi mapeada. É um campo obrigatório.']
     };
   }
 
-  // Track seen identifiers within the file
+  // Track seen identifiers within the spreadsheet (only CNPJ and IE; NOT Razão Social!)
   const seenFileCNPJs = new Set<string>();
   const seenFileIEs = new Set<string>();
-  const seenFileRazaos = new Set<string>();
 
   rows.forEach((row, idx) => {
     const rawRazao = row[razaoIndex];
@@ -243,7 +241,6 @@ export const analyzeImport = (
     const cleanRazao = rawRazao ? rawRazao.toString().trim() : '';
     const cleanIE = normalizeIE(rawIE);
     const cleanCNPJ = normalizeCNPJ(rawCnpj);
-    const normRazao = normalizeRazaoSocial(cleanRazao);
 
     // Only Razão Social is mandatory
     if (!cleanRazao) {
@@ -254,40 +251,59 @@ export const analyzeImport = (
       return;
     }
 
-    // Check duplicate within the file
+    // Check duplicate WITHIN the spreadsheet itself (CNPJ or IE)
     let isFileDuplicate = false;
     if (cleanCNPJ && cleanCNPJ.length >= 11) {
-      if (seenFileCNPJs.has(cleanCNPJ)) isFileDuplicate = true;
+      if (seenFileCNPJs.has(cleanCNPJ)) {
+        isFileDuplicate = true;
+        duplicidadesArquivo++;
+        if (duplicidadesDescricao.length < 5) {
+          duplicidadesDescricao.push(`Linha ${idx + 2}: CNPJ duplicado dentro da planilha (${formatCNPJ(cleanCNPJ)}).`);
+        }
+      } else {
+        seenFileCNPJs.add(cleanCNPJ);
+      }
     }
+
     if (!isFileDuplicate && cleanIE) {
-      if (seenFileIEs.has(cleanIE)) isFileDuplicate = true;
-    }
-    if (!isFileDuplicate && normRazao) {
-      if (seenFileRazaos.has(normRazao)) isFileDuplicate = true;
+      if (seenFileIEs.has(cleanIE)) {
+        isFileDuplicate = true;
+        duplicidadesArquivo++;
+        if (duplicidadesDescricao.length < 5) {
+          duplicidadesDescricao.push(`Linha ${idx + 2}: Inscrição Estadual duplicada dentro da planilha (${formatIE(cleanIE)}).`);
+        }
+      } else {
+        seenFileIEs.add(cleanIE);
+      }
     }
 
     if (isFileDuplicate) {
-      duplicidadesArquivo++;
-    } else {
-      if (cleanCNPJ && cleanCNPJ.length >= 11) seenFileCNPJs.add(cleanCNPJ);
-      if (cleanIE) seenFileIEs.add(cleanIE);
-      if (normRazao) seenFileRazaos.add(normRazao);
+      return;
+    }
 
-      // Check if matches an existing client in the database
-      const existingMatch = findMatchingExistingClient(cleanCNPJ, cleanIE, normRazao, existingClients);
-      if (existingMatch) {
-        existentes++;
+    // Check if matches an existing client in the database (1. CNPJ, 2. IE)
+    const existingMatch = findMatchingExistingClient(cleanCNPJ, cleanIE, existingClients);
+    if (existingMatch) {
+      existentes++;
+      if (existingMatch.por === 'CNPJ') {
+        existentesCnpj++;
       } else {
-        novos++;
+        existentesIe++;
       }
+    } else {
+      // Se não encontrou por CNPJ nem por IE, é NOVO CLIENTE (mesmo que a Razão Social coincida!)
+      novos++;
     }
   });
 
   return {
     total: rows.length,
     novos,
+    existentesCnpj,
+    existentesIe,
     existentes,
     duplicidadesArquivo,
+    duplicidadesDescricao,
     erros,
     errosDescricao
   };
@@ -295,7 +311,9 @@ export const analyzeImport = (
 
 /**
  * Commits the import to the client database.
- * Does not require Inscrição Estadual.
+ * Duplication rules:
+ * - Razão Social PODE repetir.
+ * - CNPJ e IE identificam clientes existentes para atualização se selecionado.
  */
 export const executeImport = (
   rows: any[],
@@ -321,6 +339,10 @@ export const executeImport = (
   let skippedCount = 0;
   const now = new Date().toISOString();
 
+  // Track inserted/updated identifiers during this execution to prevent file-internal duplicates
+  const processedBatchCNPJs = new Set<string>();
+  const processedBatchIEs = new Set<string>();
+
   for (const row of rows) {
     const rawRazao = idxRazao !== -1 ? row[idxRazao] : null;
     const razaoSocial = rawRazao ? rawRazao.toString().trim().toUpperCase() : '';
@@ -337,17 +359,30 @@ export const executeImport = (
     const cleanCnpj = normalizeCNPJ(rawCnpj);
     const fantasia = idxFantasia !== -1 && row[idxFantasia] ? row[idxFantasia].toString().trim().toUpperCase() : '';
     const codigo = idxCodigo !== -1 && row[idxCodigo] ? row[idxCodigo].toString().trim() : '';
-    const normRazao = normalizeRazaoSocial(razaoSocial);
 
-    // Find existing match by 1. CNPJ, 2. IE, 3. Razão Social
+    // Prevent duplicates within the batch
+    if (cleanCnpj && cleanCnpj.length >= 11) {
+      if (processedBatchCNPJs.has(cleanCnpj)) {
+        skippedCount++;
+        continue;
+      }
+      processedBatchCNPJs.add(cleanCnpj);
+    }
+
+    if (cleanIE) {
+      if (processedBatchIEs.has(cleanIE)) {
+        skippedCount++;
+        continue;
+      }
+      processedBatchIEs.add(cleanIE);
+    }
+
+    // Find existing match by 1. CNPJ, 2. IE (NEVER by Razão Social!)
     const existingIndex = currentClients.findIndex(c => {
       if (cleanCnpj && cleanCnpj.length >= 11 && c.cnpj && normalizeCNPJ(c.cnpj) === cleanCnpj) {
         return true;
       }
       if (cleanIE && c.inscricao_estadual && normalizeIE(c.inscricao_estadual) === cleanIE) {
-        return true;
-      }
-      if (normRazao && normalizeRazaoSocial(c.razao_social) === normRazao) {
         return true;
       }
       return false;

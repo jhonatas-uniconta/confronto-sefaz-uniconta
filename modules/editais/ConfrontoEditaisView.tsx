@@ -533,14 +533,26 @@ startxref
                           )}
                         </td>
                         <td className="px-4 py-3 font-mono whitespace-nowrap">
-                          {item.inscricaoEstadual ? (
+                          {item.clientesCandidatos ? (
+                            <span className="text-purple-700 font-medium bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                              Várias ({item.clientesCandidatos.length})
+                            </span>
+                          ) : item.inscricaoEstadual ? (
                             <span className="font-bold text-slate-800">{item.inscricaoEstadualFormatada}</span>
                           ) : (
                             <span className="text-slate-400 font-normal">Sem IE</span>
                           )}
                         </td>
                         <td className="px-4 py-3 font-mono text-gray-600 whitespace-nowrap">
-                          {item.cnpj ? formatCNPJ(item.cnpj) : '-'}
+                          {item.clientesCandidatos ? (
+                            <span className="text-purple-700 font-medium bg-purple-50 px-2 py-0.5 rounded border border-purple-200">
+                              Vários ({item.clientesCandidatos.length})
+                            </span>
+                          ) : item.cnpj ? (
+                            formatCNPJ(item.cnpj)
+                          ) : (
+                            '-'
+                          )}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           {(() => {
@@ -694,6 +706,36 @@ startxref
                 </span>
               </div>
             </div>
+
+            {/* Candidate clients when ambiguous */}
+            {selectedResultForDetails.clientesCandidatos && selectedResultForDetails.clientesCandidatos.length > 0 && (
+              <div className="bg-purple-50 p-3.5 rounded-xl border border-purple-200">
+                <div className="font-bold text-purple-900 text-xs mb-2 flex items-center gap-1.5">
+                  <AlertTriangle size={15} className="text-purple-600 shrink-0" />
+                  <span>
+                    Atenção: Existem {selectedResultForDetails.clientesCandidatos.length} empresas com esta mesma Razão Social cadastradas na base da Uniconta:
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {selectedResultForDetails.clientesCandidatos.map((cand, idx) => (
+                    <div key={idx} className="bg-white p-2.5 rounded-lg border border-purple-100 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-xs">
+                      <div>
+                        <span className="font-bold text-slate-800">{cand.razao_social}</span>
+                        {cand.nome_fantasia && <span className="text-slate-500 ml-1.5">({cand.nome_fantasia})</span>}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3 font-mono text-[11px] text-slate-600">
+                        <span>CNPJ: <strong>{cand.cnpj ? formatCNPJ(cand.cnpj) : 'Sem CNPJ'}</strong></span>
+                        <span>IE: <strong>{cand.inscricao_estadual ? formatIE(cand.inscricao_estadual) : 'Sem IE'}</strong></span>
+                        {cand.codigo && <span>Cód: {cand.codigo}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-purple-700 mt-2">
+                  Como o edital não especificou CNPJ ou Inscrição Estadual, confirme visualmente na página do edital qual das empresas foi notificada.
+                </p>
+              </div>
+            )}
 
             {/* Evidence snippet */}
             <div>

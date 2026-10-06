@@ -74,7 +74,8 @@ export type MetodoIdentificacao =
   | 'CNPJ' 
   | 'Inscrição Estadual' 
   | 'Razão Social' 
-  | 'Razão Social – conferir';
+  | 'Razão Social – conferir'
+  | 'Correspondência ambígua por Razão Social';
 
 export interface SituacaoVisualInfo {
   texto: string;
@@ -87,6 +88,7 @@ export interface EditalMatchResult {
   consultaId?: string;
   clienteId?: string;
   cliente?: Cliente;
+  clientesCandidatos?: Cliente[]; // Lista de clientes quando houver correspondência ambígua por Razão Social
   razaoSocial: string;
   razaoSocialPdf?: string;
   cnpj?: string;
@@ -133,8 +135,11 @@ export interface SpreadsheetColumnMapping {
 export interface ImportValidationSummary {
   total: number;
   novos: number;
-  existentes: number;
-  duplicidadesArquivo: number;
+  existentesCnpj: number; // Existentes por CNPJ
+  existentesIe: number;   // Existentes por Inscrição Estadual
+  existentes: number;     // Total já existentes
+  duplicidadesArquivo: number; // Duplicidades dentro da própria planilha
+  duplicidadesDescricao: string[];
   erros: number;
   errosDescricao: string[];
 }

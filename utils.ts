@@ -48,11 +48,37 @@ export const normalizeIE = (ie: string | null | undefined): string => {
 };
 
 /**
+ * Sanitizes an Inscrição Estadual value: strips non-digits and filters out
+ * placeholders like "-", "=", "SEM IE", "ISENTO", "NULL", "S/N".
+ * Returns clean numeric string or empty string.
+ */
+export const sanitizeIE = (ie: string | null | undefined): string => {
+  if (!ie) return '';
+  const str = ie.toString().trim();
+  const upper = str.toUpperCase();
+  if (
+    upper === '-' ||
+    upper === '=' ||
+    upper === 'SEM IE' ||
+    upper === 'ISENTO' ||
+    upper === 'NULL' ||
+    upper === 'S/N' ||
+    upper === 'N/A' ||
+    upper === 'NAO POSSUI' ||
+    upper === 'SEM INSCRIÇÃO' ||
+    upper === 'SEM INSCRICAO'
+  ) {
+    return '';
+  }
+  return normalizeIE(str);
+};
+
+/**
  * Formats an Inscrição Estadual for display (Pernambuco standard 9-digit: 0369429-10 or 14-digit: 18.1.001.0000000-0).
  * Returns "Sem IE" if absent or empty.
  */
 export const formatIE = (ie: string | null | undefined): string => {
-  const clean = normalizeIE(ie);
+  const clean = sanitizeIE(ie);
   if (!clean) return 'Sem IE';
   if (clean.length === 9) {
     return `${clean.substring(0, 7)}-${clean.substring(7, 9)}`;
@@ -213,13 +239,42 @@ export const normalizeCNPJ = (cnpj: string | null | undefined): string => {
 };
 
 /**
- * Formats a CNPJ (XX.XXX.XXX/XXXX-XX)
+ * Sanitizes a CNPJ value: removes non-digits and filters out dummy/filler values
+ * such as "-", "=", "SEM CNPJ", "ISENTO", "NULL", "S/N", "N/A".
+ * Returns clean numeric string or empty string.
+ */
+export const sanitizeCNPJ = (cnpj: string | null | undefined): string => {
+  if (!cnpj) return '';
+  const str = cnpj.toString().trim();
+  const upper = str.toUpperCase();
+  if (
+    upper === '-' ||
+    upper === '=' ||
+    upper === 'SEM CNPJ' ||
+    upper === 'ISENTO' ||
+    upper === 'NULL' ||
+    upper === 'S/N' ||
+    upper === 'N/A' ||
+    upper === 'NAO POSSUI' ||
+    upper === 'SEM DOCUMENTO'
+  ) {
+    return '';
+  }
+  return normalizeCNPJ(str);
+};
+
+/**
+ * Formats a CNPJ (XX.XXX.XXX/XXXX-XX). Returns '-' if empty or invalid.
  */
 export const formatCNPJ = (cnpj: string | null | undefined): string => {
-  const clean = normalizeCNPJ(cnpj);
+  const clean = sanitizeCNPJ(cnpj);
   if (!clean) return '-';
   if (clean.length === 14) {
     return `${clean.substring(0, 2)}.${clean.substring(2, 5)}.${clean.substring(5, 8)}/${clean.substring(8, 12)}-${clean.substring(12, 14)}`;
+  }
+  if (clean.length === 11) {
+    // CPF format if 11 digits
+    return `${clean.substring(0, 3)}.${clean.substring(3, 6)}.${clean.substring(6, 9)}-${clean.substring(9, 11)}`;
   }
   return clean;
 };
