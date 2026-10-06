@@ -36,3 +36,48 @@ export const formatDate = (dateStr: string) => {
   if (!dateStr) return '-';
   return dateStr; 
 };
+
+/**
+ * Normalizes an Inscrição Estadual by removing all non-digits.
+ * Example: "0369429-10" -> "036942910"
+ * Example: "0369429 - 10" -> "036942910"
+ */
+export const normalizeIE = (ie: string | null | undefined): string => {
+  if (!ie) return '';
+  return ie.toString().replace(/[^0-9]/g, '').trim();
+};
+
+/**
+ * Formats an Inscrição Estadual for display (Pernambuco standard 9-digit: 0369429-10 or 14-digit: 18.1.001.0000000-0)
+ */
+export const formatIE = (ie: string | null | undefined): string => {
+  const clean = normalizeIE(ie);
+  if (!clean) return '-';
+  if (clean.length === 9) {
+    return `${clean.substring(0, 7)}-${clean.substring(7, 9)}`;
+  }
+  if (clean.length === 14) {
+    return `${clean.substring(0, 2)}.${clean.substring(2, 3)}.${clean.substring(3, 6)}.${clean.substring(6, 13)}-${clean.substring(13, 14)}`;
+  }
+  return clean;
+};
+
+/**
+ * Normalizes a CNPJ by stripping non-numeric characters.
+ */
+export const normalizeCNPJ = (cnpj: string | null | undefined): string => {
+  if (!cnpj) return '';
+  return cnpj.toString().replace(/[^0-9]/g, '').trim();
+};
+
+/**
+ * Formats a CNPJ (XX.XXX.XXX/XXXX-XX)
+ */
+export const formatCNPJ = (cnpj: string | null | undefined): string => {
+  const clean = normalizeCNPJ(cnpj);
+  if (!clean) return '-';
+  if (clean.length === 14) {
+    return `${clean.substring(0, 2)}.${clean.substring(2, 5)}.${clean.substring(5, 8)}/${clean.substring(8, 12)}-${clean.substring(12, 14)}`;
+  }
+  return clean;
+};

@@ -1,5 +1,6 @@
 {
   "name": "Confronto NF-e Uniconta",
   "description": "A professional tool for reconciling accounting records with SEFAZ (Government) fiscal invoices. Features automated file parsing, status matching, data visualization, and PDF reporting.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": []
 }
