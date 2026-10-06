@@ -5,6 +5,8 @@ import {
   formatIE, 
   normalizeCNPJ, 
   formatCNPJ, 
+  sanitizeCNPJ,
+  sanitizeIE,
   normalizeKey,
   matchRazaoSocialInLine 
 } from '../utils';

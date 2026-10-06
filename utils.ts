@@ -38,39 +38,21 @@ export const formatDate = (dateStr: string) => {
 };
 
 /**
- * Normalizes an Inscrição Estadual by removing all non-digits.
- * Example: "0369429-10" -> "036942910"
- * Example: "0369429 - 10" -> "036942910"
+ * Normalizes and sanitizes an Inscrição Estadual value.
+ * Accepts string, null, undefined.
+ * Returns only digits (e.g. "036942910") or null if empty / without digits.
  */
-export const normalizeIE = (ie: string | null | undefined): string => {
-  if (!ie) return '';
-  return ie.toString().replace(/[^0-9]/g, '').trim();
-};
+export function sanitizeIE(value?: string | null): string | null {
+  if (!value) return null;
+  const digits = value.toString().replace(/\D/g, "");
+  return digits.length > 0 ? digits : null;
+}
 
 /**
- * Sanitizes an Inscrição Estadual value: strips non-digits and filters out
- * placeholders like "-", "=", "SEM IE", "ISENTO", "NULL", "S/N".
- * Returns clean numeric string or empty string.
+ * Normalizes an Inscrição Estadual by removing all non-digits. Returns empty string if absent.
  */
-export const sanitizeIE = (ie: string | null | undefined): string => {
-  if (!ie) return '';
-  const str = ie.toString().trim();
-  const upper = str.toUpperCase();
-  if (
-    upper === '-' ||
-    upper === '=' ||
-    upper === 'SEM IE' ||
-    upper === 'ISENTO' ||
-    upper === 'NULL' ||
-    upper === 'S/N' ||
-    upper === 'N/A' ||
-    upper === 'NAO POSSUI' ||
-    upper === 'SEM INSCRIÇÃO' ||
-    upper === 'SEM INSCRICAO'
-  ) {
-    return '';
-  }
-  return normalizeIE(str);
+export const normalizeIE = (ie?: string | null): string => {
+  return sanitizeIE(ie) || '';
 };
 
 /**
@@ -231,42 +213,29 @@ export const matchRazaoSocialInLine = (
 
 
 /**
- * Normalizes a CNPJ by stripping non-numeric characters.
+ * Normalizes and sanitizes a CNPJ value.
+ * Accepts string, null, undefined.
+ * Returns only digits (e.g. "12345678000190") or null if empty / without digits.
  */
-export const normalizeCNPJ = (cnpj: string | null | undefined): string => {
-  if (!cnpj) return '';
-  return cnpj.toString().replace(/[^0-9]/g, '').trim();
-};
+export function sanitizeCNPJ(value?: string | null): string | null {
+  if (!value) return null;
+
+  const digits = value.toString().replace(/\D/g, "");
+
+  return digits.length > 0 ? digits : null;
+}
 
 /**
- * Sanitizes a CNPJ value: removes non-digits and filters out dummy/filler values
- * such as "-", "=", "SEM CNPJ", "ISENTO", "NULL", "S/N", "N/A".
- * Returns clean numeric string or empty string.
+ * Normalizes a CNPJ by stripping non-numeric characters. Returns empty string if absent.
  */
-export const sanitizeCNPJ = (cnpj: string | null | undefined): string => {
-  if (!cnpj) return '';
-  const str = cnpj.toString().trim();
-  const upper = str.toUpperCase();
-  if (
-    upper === '-' ||
-    upper === '=' ||
-    upper === 'SEM CNPJ' ||
-    upper === 'ISENTO' ||
-    upper === 'NULL' ||
-    upper === 'S/N' ||
-    upper === 'N/A' ||
-    upper === 'NAO POSSUI' ||
-    upper === 'SEM DOCUMENTO'
-  ) {
-    return '';
-  }
-  return normalizeCNPJ(str);
+export const normalizeCNPJ = (value?: string | null): string => {
+  return sanitizeCNPJ(value) || '';
 };
 
 /**
  * Formats a CNPJ (XX.XXX.XXX/XXXX-XX). Returns '-' if empty or invalid.
  */
-export const formatCNPJ = (cnpj: string | null | undefined): string => {
+export const formatCNPJ = (cnpj?: string | null): string => {
   const clean = sanitizeCNPJ(cnpj);
   if (!clean) return '-';
   if (clean.length === 14) {

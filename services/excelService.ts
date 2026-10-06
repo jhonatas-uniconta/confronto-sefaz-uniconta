@@ -1,6 +1,15 @@
 import * as XLSX from 'xlsx';
 import { EditalMatchResult, Cliente, SpreadsheetColumnMapping, ImportValidationSummary } from '../types';
-import { normalizeHeader, normalizeIE, formatIE, normalizeCNPJ, formatCNPJ, normalizeRazaoSocial } from '../utils';
+import { 
+  normalizeHeader, 
+  normalizeIE, 
+  formatIE, 
+  normalizeCNPJ, 
+  formatCNPJ, 
+  sanitizeCNPJ, 
+  sanitizeIE, 
+  normalizeRazaoSocial 
+} from '../utils';
 import { getClients, saveClientsToStorage } from './clientService';
 
 /**
@@ -171,19 +180,25 @@ export const parseClientSpreadsheet = async (file: File): Promise<ParsedSpreadsh
  * (Razão Social NÃO é utilizada para identificar duplicidade ou matching)
  */
 const findMatchingExistingClient = (
-  cnpj: string,
-  ie: string,
+  cnpj: string | null,
+  ie: string | null,
   existingClients: Cliente[]
 ): { match: Cliente; por: 'CNPJ' | 'IE' } | undefined => {
   // 1. Match by CNPJ
   if (cnpj && cnpj.length >= 11) {
-    const matchCNPJ = existingClients.find(c => c.cnpj && normalizeCNPJ(c.cnpj) === cnpj);
+    const matchCNPJ = existingClients.find(c => {
+      const cCnpj = sanitizeCNPJ(c.cnpj);
+      return cCnpj && cCnpj === cnpj;
+    });
     if (matchCNPJ) return { match: matchCNPJ, por: 'CNPJ' };
   }
 
   // 2. Match by IE (only if candidate has IE)
   if (ie) {
-    const matchIE = existingClients.find(c => c.inscricao_estadual && normalizeIE(c.inscricao_estadual) === ie);
+    const matchIE = existingClients.find(c => {
+      const cIe = sanitizeIE(c.inscricao_estadual);
+      return cIe && cIe === ie;
+    });
     if (matchIE) return { match: matchIE, por: 'IE' };
   }
 
@@ -239,8 +254,8 @@ export const analyzeImport = (
     const rawCnpj = cnpjIndex !== -1 ? row[cnpjIndex] : null;
 
     const cleanRazao = rawRazao ? rawRazao.toString().trim() : '';
-    const cleanIE = normalizeIE(rawIE);
-    const cleanCNPJ = normalizeCNPJ(rawCnpj);
+    const cleanIE = sanitizeIE(rawIE);
+    const cleanCNPJ = sanitizeCNPJ(rawCnpj);
 
     // Only Razão Social is mandatory
     if (!cleanRazao) {
@@ -353,10 +368,10 @@ export const executeImport = (
     }
 
     const rawIE = idxIE !== -1 ? row[idxIE] : null;
-    const cleanIE = normalizeIE(rawIE);
+    const cleanIE = sanitizeIE(rawIE);
 
     const rawCnpj = idxCnpj !== -1 ? row[idxCnpj] : '';
-    const cleanCnpj = normalizeCNPJ(rawCnpj);
+    const cleanCnpj = sanitizeCNPJ(rawCnpj);
     const fantasia = idxFantasia !== -1 && row[idxFantasia] ? row[idxFantasia].toString().trim().toUpperCase() : '';
     const codigo = idxCodigo !== -1 && row[idxCodigo] ? row[idxCodigo].toString().trim() : '';
 
@@ -379,10 +394,12 @@ export const executeImport = (
 
     // Find existing match by 1. CNPJ, 2. IE (NEVER by Razão Social!)
     const existingIndex = currentClients.findIndex(c => {
-      if (cleanCnpj && cleanCnpj.length >= 11 && c.cnpj && normalizeCNPJ(c.cnpj) === cleanCnpj) {
+      const cCnpj = sanitizeCNPJ(c.cnpj);
+      if (cleanCnpj && cleanCnpj.length >= 11 && cCnpj && cCnpj === cleanCnpj) {
         return true;
       }
-      if (cleanIE && c.inscricao_estadual && normalizeIE(c.inscricao_estadual) === cleanIE) {
+      const cIe = sanitizeIE(c.inscricao_estadual);
+      if (cleanIE && cIe && cIe === cleanIE) {
         return true;
       }
       return false;
