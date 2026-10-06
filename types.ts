@@ -54,8 +54,8 @@ export interface Cliente {
   id: string;
   codigo?: string;
   cnpj?: string;
-  inscricao_estadual: string; // Normalized: e.g. "036942910"
-  inscricao_estadual_formatada: string; // Formatted: e.g. "0369429-10"
+  inscricao_estadual?: string; // Normalized: e.g. "036942910" or empty/null
+  inscricao_estadual_formatada?: string; // Formatted: e.g. "0369429-10" or "Sem IE"
   razao_social: string;
   nome_fantasia?: string;
   ativo: boolean;
@@ -69,6 +69,12 @@ export enum TipoEdital {
   DESCREDENCIAMENTO_ANTECIPACAO = 'Descredenciamento da Antecipação Tributária',
   OUTRO = 'Outro / Não identificado'
 }
+
+export type MetodoIdentificacao = 
+  | 'CNPJ' 
+  | 'Inscrição Estadual' 
+  | 'Razão Social' 
+  | 'Razão Social – conferir';
 
 export interface SituacaoVisualInfo {
   texto: string;
@@ -84,14 +90,16 @@ export interface EditalMatchResult {
   razaoSocial: string;
   razaoSocialPdf?: string;
   cnpj?: string;
-  inscricaoEstadual: string; // Normalized
-  inscricaoEstadualFormatada: string; // Formatted
+  inscricaoEstadual?: string; // Normalized or empty
+  inscricaoEstadualFormatada?: string; // Formatted or "Sem IE"
   tipoEdital: TipoEdital | string;
   numeroEdital: string;
   arquivo: string;
   pagina: number;
   trechoOriginal: string;
   dataProcessamento: string;
+  encontradoPor: MetodoIdentificacao;
+  similaridade?: number; // 0.0 - 1.0 (e.g. 0.98 = 98%)
   situacaoVisual: SituacaoVisualInfo;
 }
 

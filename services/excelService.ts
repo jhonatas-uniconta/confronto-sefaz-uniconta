@@ -1,14 +1,17 @@
 import * as XLSX from 'xlsx';
 import { EditalMatchResult, Cliente, SpreadsheetColumnMapping, ImportValidationSummary } from '../types';
-import { normalizeHeader, normalizeIE, formatIE, normalizeCNPJ, formatCNPJ } from '../utils';
+import { normalizeHeader, normalizeIE, formatIE, normalizeCNPJ, formatCNPJ, normalizeRazaoSocial } from '../utils';
 import { getClients, saveClientsToStorage } from './clientService';
 
 /**
  * Exports Edital confrontation results to Excel (.xlsx)
- * Exactly per user specification:
+ * Columns:
+ * - Situação
  * - Cliente
+ * - Nome Fantasia
  * - CNPJ
  * - Inscrição Estadual
+ * - Encontrado por (CNPJ | Inscrição Estadual | Razão Social | Razão Social – conferir)
  * - Tipo do Edital
  * - Número do Edital
  * - Arquivo
@@ -22,7 +25,8 @@ export const exportEditaisToExcel = (results: EditalMatchResult[], customFileNam
     'Cliente': r.razaoSocial,
     'Nome Fantasia': r.cliente?.nome_fantasia || '',
     'CNPJ': r.cnpj ? formatCNPJ(r.cnpj) : '-',
-    'Inscrição Estadual': formatIE(r.inscricaoEstadual),
+    'Inscrição Estadual': r.inscricaoEstadual ? formatIE(r.inscricaoEstadual) : 'Sem IE',
+    'Encontrado por': r.encontradoPor || 'Inscrição Estadual',
     'Tipo do Edital': r.tipoEdital,
     'Número do Edital': r.numeroEdital,
     'Arquivo': r.arquivo,
@@ -33,13 +37,13 @@ export const exportEditaisToExcel = (results: EditalMatchResult[], customFileNam
 
   const worksheet = XLSX.utils.json_to_sheet(rows);
 
-  // Set column widths for readability
   worksheet['!cols'] = [
     { wch: 36 }, // Situação
     { wch: 38 }, // Cliente
     { wch: 25 }, // Fantasia
     { wch: 20 }, // CNPJ
     { wch: 18 }, // IE
+    { wch: 24 }, // Encontrado por
     { wch: 45 }, // Tipo do Edital
     { wch: 18 }, // Número
     { wch: 28 }, // Arquivo
@@ -64,7 +68,7 @@ export const exportClientsToExcel = (clients: Cliente[]): void => {
     'Razão Social': c.razao_social,
     'Nome Fantasia': c.nome_fantasia || '',
     'CNPJ': c.cnpj ? formatCNPJ(c.cnpj) : '',
-    'Inscrição Estadual': formatIE(c.inscricao_estadual),
+    'Inscrição Estadual': c.inscricao_estadual ? formatIE(c.inscricao_estadual) : 'Sem IE',
     'Status': c.ativo ? 'Ativo' : 'Inativo',
     'Cadastrado Em': new Date(c.created_at).toLocaleDateString('pt-BR'),
     'Atualizado Em': new Date(c.updated_at).toLocaleDateString('pt-BR')
@@ -94,13 +98,7 @@ export interface ParsedSpreadsheetData {
 }
 
 /**
- * Intelligent auto-mapping of spreadsheet columns to system fields:
- * Inscrição Estadual -> Inscrição Estadual
- * IE -> Inscrição Estadual
- * Razão Social -> Razão Social
- * CNPJ -> CNPJ
- * Nome Fantasia -> Nome Fantasia
- * Código -> Código
+ * Intelligent auto-mapping of spreadsheet columns to system fields
  */
 export const suggestMapping = (header: string): keyof Cliente | 'ignorar' => {
   const norm = normalizeHeader(header);
@@ -167,7 +165,43 @@ export const parseClientSpreadsheet = async (file: File): Promise<ParsedSpreadsh
 };
 
 /**
- * Analyzes and validates records based on mappings before confirming import
+ * Finds an existing client matching candidate according to priority:
+ * 1. CNPJ igual (quando preenchido com >= 11 dígitos)
+ * 2. IE igual (quando ambos possuírem IE preenchida)
+ * 3. Razão Social normalizada igual
+ */
+const findMatchingExistingClient = (
+  cnpj: string,
+  ie: string,
+  razaoNorm: string,
+  existingClients: Cliente[]
+): Cliente | undefined => {
+  // 1. Match by CNPJ
+  if (cnpj && cnpj.length >= 11) {
+    const matchCNPJ = existingClients.find(c => c.cnpj && normalizeCNPJ(c.cnpj) === cnpj);
+    if (matchCNPJ) return matchCNPJ;
+  }
+
+  // 2. Match by IE (only if candidate has IE)
+  if (ie) {
+    const matchIE = existingClients.find(c => c.inscricao_estadual && normalizeIE(c.inscricao_estadual) === ie);
+    if (matchIE) return matchIE;
+  }
+
+  // 3. Match by normalized Razão Social
+  if (razaoNorm) {
+    const matchRazao = existingClients.find(c => normalizeRazaoSocial(c.razao_social) === razaoNorm);
+    if (matchRazao) return matchRazao;
+  }
+
+  return undefined;
+};
+
+/**
+ * Analyzes and validates records based on mappings before confirming import.
+ * Razão Social: Obrigatória.
+ * IE: Opcional. Linhas sem IE NÃO geram erro.
+ * CNPJ: Opcional, recomendado.
  */
 export const analyzeImport = (
   rows: any[],
@@ -175,31 +209,15 @@ export const analyzeImport = (
   mappings: SpreadsheetColumnMapping[],
   existingClients: Cliente[]
 ): ImportValidationSummary => {
-  const existingIeMap = new Map<string, Cliente>();
-  existingClients.forEach(c => {
-    existingIeMap.set(c.inscricao_estadual, c);
-  });
-
   const ieIndex = headers.indexOf(mappings.find(m => m.campoDestino === 'inscricao_estadual')?.colunaPlanilha || '');
   const razaoIndex = headers.indexOf(mappings.find(m => m.campoDestino === 'razao_social')?.colunaPlanilha || '');
+  const cnpjIndex = headers.indexOf(mappings.find(m => m.campoDestino === 'cnpj')?.colunaPlanilha || '');
 
   let novos = 0;
   let existentes = 0;
   let erros = 0;
   let duplicidadesArquivo = 0;
   const errosDescricao: string[] = [];
-  const seenFileIes = new Set<string>();
-
-  if (ieIndex === -1) {
-    return {
-      total: rows.length,
-      novos: 0,
-      existentes: 0,
-      duplicidadesArquivo: 0,
-      erros: rows.length,
-      errosDescricao: ['A coluna para "Inscrição Estadual" não foi mapeada.']
-    };
-  }
 
   if (razaoIndex === -1) {
     return {
@@ -208,38 +226,56 @@ export const analyzeImport = (
       existentes: 0,
       duplicidadesArquivo: 0,
       erros: rows.length,
-      errosDescricao: ['A coluna para "Razão Social" não foi mapeada.']
+      errosDescricao: ['A coluna para "Razão Social" não foi mapeada. É um campo obrigatório.']
     };
   }
 
+  // Track seen identifiers within the file
+  const seenFileCNPJs = new Set<string>();
+  const seenFileIEs = new Set<string>();
+  const seenFileRazaos = new Set<string>();
+
   rows.forEach((row, idx) => {
-    const rawIE = row[ieIndex];
     const rawRazao = row[razaoIndex];
+    const rawIE = ieIndex !== -1 ? row[ieIndex] : null;
+    const rawCnpj = cnpjIndex !== -1 ? row[cnpjIndex] : null;
 
-    const cleanIE = normalizeIE(rawIE);
     const cleanRazao = rawRazao ? rawRazao.toString().trim() : '';
+    const cleanIE = normalizeIE(rawIE);
+    const cleanCNPJ = normalizeCNPJ(rawCnpj);
+    const normRazao = normalizeRazaoSocial(cleanRazao);
 
-    if (!cleanIE) {
-      erros++;
-      if (errosDescricao.length < 5) {
-        errosDescricao.push(`Linha ${idx + 2}: Inscrição Estadual vazia ou inválida.`);
-      }
-      return;
-    }
-
+    // Only Razão Social is mandatory
     if (!cleanRazao) {
       erros++;
       if (errosDescricao.length < 5) {
-        errosDescricao.push(`Linha ${idx + 2} (IE ${cleanIE}): Razão Social não informada.`);
+        errosDescricao.push(`Linha ${idx + 2}: Razão Social não informada.`);
       }
       return;
     }
 
-    if (seenFileIes.has(cleanIE)) {
+    // Check duplicate within the file
+    let isFileDuplicate = false;
+    if (cleanCNPJ && cleanCNPJ.length >= 11) {
+      if (seenFileCNPJs.has(cleanCNPJ)) isFileDuplicate = true;
+    }
+    if (!isFileDuplicate && cleanIE) {
+      if (seenFileIEs.has(cleanIE)) isFileDuplicate = true;
+    }
+    if (!isFileDuplicate && normRazao) {
+      if (seenFileRazaos.has(normRazao)) isFileDuplicate = true;
+    }
+
+    if (isFileDuplicate) {
       duplicidadesArquivo++;
     } else {
-      seenFileIes.add(cleanIE);
-      if (existingIeMap.has(cleanIE)) {
+      if (cleanCNPJ && cleanCNPJ.length >= 11) seenFileCNPJs.add(cleanCNPJ);
+      if (cleanIE) seenFileIEs.add(cleanIE);
+      if (normRazao) seenFileRazaos.add(normRazao);
+
+      // Check if matches an existing client in the database
+      const existingMatch = findMatchingExistingClient(cleanCNPJ, cleanIE, normRazao, existingClients);
+      if (existingMatch) {
         existentes++;
       } else {
         novos++;
@@ -258,7 +294,8 @@ export const analyzeImport = (
 };
 
 /**
- * Commits the import to the client database
+ * Commits the import to the client database.
+ * Does not require Inscrição Estadual.
  */
 export const executeImport = (
   rows: any[],
@@ -266,11 +303,7 @@ export const executeImport = (
   mappings: SpreadsheetColumnMapping[],
   updateExisting: boolean
 ): { importedCount: number; updatedCount: number; skippedCount: number } => {
-  const currentClients = getClients();
-  const ieMap = new Map<string, number>();
-  currentClients.forEach((c, idx) => {
-    ieMap.set(c.inscricao_estadual, idx);
-  });
+  const currentClients = [...getClients()];
 
   const getColIndex = (field: keyof Cliente) => {
     const m = mappings.find(item => item.campoDestino === field);
@@ -289,31 +322,48 @@ export const executeImport = (
   const now = new Date().toISOString();
 
   for (const row of rows) {
-    const rawIE = idxIE !== -1 ? row[idxIE] : null;
     const rawRazao = idxRazao !== -1 ? row[idxRazao] : null;
-
-    const cleanIE = normalizeIE(rawIE);
     const razaoSocial = rawRazao ? rawRazao.toString().trim().toUpperCase() : '';
 
-    if (!cleanIE || !razaoSocial) {
+    if (!razaoSocial) {
       skippedCount++;
       continue;
     }
+
+    const rawIE = idxIE !== -1 ? row[idxIE] : null;
+    const cleanIE = normalizeIE(rawIE);
 
     const rawCnpj = idxCnpj !== -1 ? row[idxCnpj] : '';
     const cleanCnpj = normalizeCNPJ(rawCnpj);
     const fantasia = idxFantasia !== -1 && row[idxFantasia] ? row[idxFantasia].toString().trim().toUpperCase() : '';
     const codigo = idxCodigo !== -1 && row[idxCodigo] ? row[idxCodigo].toString().trim() : '';
+    const normRazao = normalizeRazaoSocial(razaoSocial);
 
-    if (ieMap.has(cleanIE)) {
+    // Find existing match by 1. CNPJ, 2. IE, 3. Razão Social
+    const existingIndex = currentClients.findIndex(c => {
+      if (cleanCnpj && cleanCnpj.length >= 11 && c.cnpj && normalizeCNPJ(c.cnpj) === cleanCnpj) {
+        return true;
+      }
+      if (cleanIE && c.inscricao_estadual && normalizeIE(c.inscricao_estadual) === cleanIE) {
+        return true;
+      }
+      if (normRazao && normalizeRazaoSocial(c.razao_social) === normRazao) {
+        return true;
+      }
+      return false;
+    });
+
+    if (existingIndex !== -1) {
       if (updateExisting) {
-        const clientIndex = ieMap.get(cleanIE)!;
-        currentClients[clientIndex] = {
-          ...currentClients[clientIndex],
+        const prev = currentClients[existingIndex];
+        currentClients[existingIndex] = {
+          ...prev,
           razao_social: razaoSocial,
-          nome_fantasia: fantasia || currentClients[clientIndex].nome_fantasia,
-          cnpj: cleanCnpj ? formatCNPJ(cleanCnpj) : currentClients[clientIndex].cnpj,
-          codigo: codigo || currentClients[clientIndex].codigo,
+          nome_fantasia: fantasia || prev.nome_fantasia,
+          cnpj: cleanCnpj ? formatCNPJ(cleanCnpj) : prev.cnpj,
+          inscricao_estadual: cleanIE || prev.inscricao_estadual || '',
+          inscricao_estadual_formatada: cleanIE ? formatIE(cleanIE) : (prev.inscricao_estadual_formatada || 'Sem IE'),
+          codigo: codigo || prev.codigo,
           updated_at: now
         };
         updatedCount++;
@@ -325,8 +375,8 @@ export const executeImport = (
         id: 'cli-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
         codigo: codigo,
         cnpj: cleanCnpj ? formatCNPJ(cleanCnpj) : '',
-        inscricao_estadual: cleanIE,
-        inscricao_estadual_formatada: formatIE(cleanIE),
+        inscricao_estadual: cleanIE || '',
+        inscricao_estadual_formatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
         razao_social: razaoSocial,
         nome_fantasia: fantasia,
         ativo: true,
@@ -334,7 +384,6 @@ export const executeImport = (
         updated_at: now
       };
       currentClients.push(newClient);
-      ieMap.set(cleanIE, currentClients.length - 1);
       importedCount++;
     }
   }
@@ -342,3 +391,4 @@ export const executeImport = (
   saveClientsToStorage(currentClients);
   return { importedCount, updatedCount, skippedCount };
 };
+

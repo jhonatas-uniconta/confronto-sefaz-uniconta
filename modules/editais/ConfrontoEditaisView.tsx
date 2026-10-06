@@ -9,10 +9,11 @@ import {
   TipoEdital, 
   EditalMatchResult, 
   EditalProcessingStats,
-  ConsultaEdital
+  ConsultaEdital,
+  MetodoIdentificacao
 } from '../../types';
 import { getClients } from '../../services/clientService';
-import { processEditalPdf, PdfDocumentAnalysis } from '../../services/pdfEditalService';
+import { processEditalPdf, PdfDocumentAnalysis, getMetodoBadge } from '../../services/pdfEditalService';
 import { exportEditaisToExcel } from '../../services/excelService';
 import { saveConsulta } from '../../services/historyService';
 import { Card, Button, Modal } from '../../components/ui';
@@ -78,29 +79,34 @@ export const ConfrontoEditaisView: React.FC = () => {
 
   // Helper to generate a demo sample SEFAZ-PE PDF for immediate testing
   const handleLoadDemoPdf = () => {
-    // Generate a minimal valid PDF with SEFAZ-PE Intimação layout containing client "0369429-10"
+    // Generate a minimal valid PDF with SEFAZ-PE Intimação layout testing all 3 identification levels:
+    // 1. IE & CNPJ: Isabel Cristina Cavalcanti Rodrigues
+    // 2. CNPJ (sem IE): Industria Metalurgica do Vale Ltda
+    // 3. Razão Social (sem IE e sem CNPJ): Empresa ABC Servicos Ltda
     const sampleText = `%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
 3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >> endobj
 4 0 obj << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> endobj
-5 0 obj << /Length 380 >> stream
+5 0 obj << /Length 520 >> stream
 BT
 /F1 14 Tf
 50 720 Td
 (GOVERNO DO ESTADO DE PERNAMBUCO - SEFAZ-PE) Tj
 /F1 12 Tf
 0 -25 Td
-(EDITAL DE INTIMACAO N. 037/2026 - INSCRICAO ESTADUAL) Tj
+(EDITAL DE INTIMACAO N. 037/2026 - ANTECIPACAO E REGULARIZACAO) Tj
 /F1 10 Tf
 0 -30 Td
 (O Diretor de Fiscalizacao da SEFAZ-PE intima os contribuintes abaixo relacionados:) Tj
 0 -30 Td
-(0369429-10  10.316.742  ISABEL CRISTINA CAVALCANTI RODRIGUES  CARUARU-PE) Tj
+(0369429-10  10.316.742/0001-85  ISABEL CRISTINA CAVALCANTI RODRIGUES  CARUARU-PE) Tj
 0 -20 Td
-(0482910-44  08.452.190  COMERCIAL ALIMENTOS DO AGRESTE LTDA  CARUARU-PE) Tj
+(18.765.432/0001-01  INDUSTRIA METALURGICA DO VALE LTDA  CARUARU-PE) Tj
 0 -20 Td
-(0999999-99  99.999.999  OUTRO CONTRIBUINTE NAO CADASTRADO  RECIFE-PE) Tj
+(EMPRESA ABC SERVICOS LTDA  CARUARU-PE) Tj
+0 -20 Td
+(0999999-99  99.999.999/0001-99  OUTRO CONTRIBUINTE NAO CADASTRADO  RECIFE-PE) Tj
 ET
 endstream
 endobj
@@ -114,7 +120,7 @@ xref
 0000000295 00000 n 
 trailer << /Size 6 /Root 1 0 R >>
 startxref
-725
+865
 %%EOF`;
 
     const blob = new Blob([sampleText], { type: 'application/pdf' });
@@ -501,6 +507,7 @@ startxref
                       <th className="px-4 py-3">Cliente</th>
                       <th className="px-4 py-3">Inscrição Estadual</th>
                       <th className="px-4 py-3">CNPJ</th>
+                      <th className="px-4 py-3">Encontrado por</th>
                       <th className="px-4 py-3">Tipo do Edital</th>
                       <th className="px-4 py-3">Nº Edital</th>
                       <th className="px-4 py-3">Arquivo</th>
@@ -525,11 +532,30 @@ startxref
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 font-mono font-bold text-slate-800 whitespace-nowrap">
-                          {item.inscricaoEstadualFormatada}
+                        <td className="px-4 py-3 font-mono whitespace-nowrap">
+                          {item.inscricaoEstadual ? (
+                            <span className="font-bold text-slate-800">{item.inscricaoEstadualFormatada}</span>
+                          ) : (
+                            <span className="text-slate-400 font-normal">Sem IE</span>
+                          )}
                         </td>
                         <td className="px-4 py-3 font-mono text-gray-600 whitespace-nowrap">
                           {item.cnpj ? formatCNPJ(item.cnpj) : '-'}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {(() => {
+                            const badge = getMetodoBadge(item.encontradoPor);
+                            return (
+                              <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] border font-medium ${badge.cor}`}>
+                                {badge.texto}
+                                {item.similaridade && item.similaridade < 1.0 && (
+                                  <span className="text-[10px] opacity-80 font-mono">
+                                    ({Math.round(item.similaridade * 100)}%)
+                                  </span>
+                                )}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-4 py-3 text-slate-700 max-w-[180px] truncate" title={item.tipoEdital}>
                           {item.tipoEdital}
@@ -563,7 +589,7 @@ startxref
 
                     {filteredResults.length === 0 && (
                       <tr>
-                        <td colSpan={10} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={11} className="px-4 py-8 text-center text-gray-500">
                           Nenhum resultado corresponde aos filtros de busca aplicados.
                         </td>
                       </tr>
@@ -646,6 +672,18 @@ startxref
                 <span className="text-gray-500 block">Arquivo PDF de Origem:</span>
                 <span className="text-slate-800 text-xs block mt-0.5 truncate" title={selectedResultForDetails.arquivo}>
                   {selectedResultForDetails.arquivo}
+                </span>
+              </div>
+
+              <div>
+                <span className="text-gray-500 block">Encontrado por:</span>
+                <span className="font-semibold text-slate-900 text-xs block mt-0.5">
+                  {selectedResultForDetails.encontradoPor}
+                  {selectedResultForDetails.similaridade && selectedResultForDetails.similaridade < 1.0 && (
+                    <span className="text-slate-500 font-normal ml-1">
+                      ({Math.round(selectedResultForDetails.similaridade * 100)}% de similaridade)
+                    </span>
+                  )}
                 </span>
               </div>
 

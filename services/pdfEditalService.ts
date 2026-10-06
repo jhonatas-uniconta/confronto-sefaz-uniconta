@@ -1,6 +1,13 @@
 import * as pdfjsLib from 'pdfjs-dist';
-import { Cliente, TipoEdital, EditalMatchResult, SituacaoVisualInfo } from '../types';
-import { normalizeIE, formatIE, formatCNPJ } from '../utils';
+import { Cliente, TipoEdital, EditalMatchResult, SituacaoVisualInfo, MetodoIdentificacao } from '../types';
+import { 
+  normalizeIE, 
+  formatIE, 
+  normalizeCNPJ, 
+  formatCNPJ, 
+  normalizeKey,
+  matchRazaoSocialInLine 
+} from '../utils';
 
 // Configure worker for browser environment
 if (typeof window !== 'undefined') {
@@ -28,6 +35,37 @@ export interface PdfDocumentAnalysis {
   matches: EditalMatchResult[];
   pages: ExtractedPageText[];
 }
+
+/**
+ * Returns visual badge styling for the identification method
+ * - Verde: CNPJ & Inscrição Estadual
+ * - Amarelo: Razão Social
+ * - Laranja: Razão Social – conferir
+ */
+export const getMetodoBadge = (metodo: MetodoIdentificacao): { cor: string; texto: string } => {
+  switch (metodo) {
+    case 'CNPJ':
+      return {
+        cor: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+        texto: 'CNPJ'
+      };
+    case 'Inscrição Estadual':
+      return {
+        cor: 'bg-emerald-50 text-emerald-800 border-emerald-300',
+        texto: 'Inscrição Estadual'
+      };
+    case 'Razão Social':
+      return {
+        cor: 'bg-amber-50 text-amber-800 border-amber-300',
+        texto: 'Razão Social'
+      };
+    case 'Razão Social – conferir':
+      return {
+        cor: 'bg-orange-50 text-orange-800 border-orange-300',
+        texto: 'Razão Social – conferir'
+      };
+  }
+};
 
 /**
  * Identifies the document type from text content
@@ -67,7 +105,6 @@ export const identifyDocumentType = (text: string): { tipo: TipoEdital; auto: bo
  * Extracts edital number from document text (e.g., "037/2026", "Nº 023/2026")
  */
 export const extractEditalNumber = (text: string): string => {
-  // Common patterns in SEFAZ-PE: "EDITAL ... Nº 023/2026" or "Nº. 037/2026" or "N° 024/2026"
   const regexPatterns = [
     /EDITAL[^\n\r]*?N[ºo°\.]?\s*[:\.]?\s*(\d{1,4}\s*\/\s*\d{4})/i,
     /N[ºo°\.]?\s*[:\.]?\s*(\d{1,4}\s*\/\s*\d{4})/i,
@@ -180,7 +217,11 @@ export const extractTextFromPdf = async (
 };
 
 /**
- * Analyzes a PDF file against the clients base
+ * Analyzes a PDF file against the clients base.
+ * Implements 3-level matching in order of reliability:
+ * 1. CNPJ, when available in PDF
+ * 2. Inscrição Estadual, when available
+ * 3. Razão Social (exact or similarity >= 85%), when no CNPJ/IE or client has no IE
  */
 export const processEditalPdf = async (
   file: File,
@@ -204,79 +245,97 @@ export const processEditalPdf = async (
   const tipoEdital = manualTipo && manualTipo !== TipoEdital.OUTRO ? manualTipo : identified.tipo;
   const numeroEdital = extractEditalNumber(sampleHeader || fullText);
 
-  // Step 3: Extraindo inscrições estaduais e confrontando com clientes...
-  if (onProgress) onProgress('Extraindo inscrições estaduais...', 75);
+  // Step 3: Confrontando com clientes...
+  if (onProgress) onProgress('Confrontando com clientes por CNPJ, IE e Razão Social...', 80);
 
-  // Filter active clients
+  // Active clients to check (with or without IE!)
   const activeClients = clients.filter(c => c.ativo !== false);
-  const clientByNormalizedIE = new Map<string, Cliente>();
-  activeClients.forEach(c => {
-    const clean = normalizeIE(c.inscricao_estadual);
-    if (clean) {
-      clientByNormalizedIE.set(clean, c);
-    }
-  });
-
-  if (onProgress) onProgress('Confrontando com clientes...', 85);
-
   const matches: EditalMatchResult[] = [];
-  const processedIeMatches = new Set<string>(); // avoid duplicate reporting of same client on same page
+  const processedMatches = new Set<string>(); // Avoid duplicate matches for same client on same page
   let totalIesFoundInDoc = 0;
 
   // Regex to detect 9-digit PE IEs in lines (e.g. 0369429-10 or 036942910)
   const ieGeneralRegex = /\b(\d{7}[-\s]?\d{2}|\d{9})\b/g;
 
   for (const page of pages) {
-    // Count total IEs found in page
     const pageMatches = page.text.match(ieGeneralRegex);
     if (pageMatches) {
       totalIesFoundInDoc += pageMatches.length;
     }
 
-    // Check each line of the page
     for (const line of page.lines) {
-      // 1. Direct search for any client's IE in the line
-      for (const [cleanIE, client] of clientByNormalizedIE.entries()) {
-        const formatted = formatIE(cleanIE);
-        const lineClean = normalizeIE(line);
+      const lineCleanDigits = normalizeKey(line);
 
-        const containsExact = line.includes(formatted) || line.includes(cleanIE) || lineClean.includes(cleanIE);
+      for (const client of activeClients) {
+        const matchKey = `${file.name}-${page.pageNumber}-${client.id}`;
+        if (processedMatches.has(matchKey)) continue;
 
-        if (containsExact) {
-          const matchKey = `${file.name}-${page.pageNumber}-${cleanIE}`;
-          if (!processedIeMatches.has(matchKey)) {
-            processedIeMatches.add(matchKey);
+        let matched = false;
+        let metodo: MetodoIdentificacao = 'Inscrição Estadual';
+        let similarityScore: number | undefined = undefined;
 
-            // Clean snippet
-            const snippet = line.trim();
-
-            // Try to extract legal name from line if present
-            let razaoPdf = client.razao_social;
-            // Clean out the IE and possible numbers to see remaining text
-            const lineWithoutIE = snippet.replace(formatted, '').replace(cleanIE, '');
-            const possibleName = lineWithoutIE.replace(/[\d\.\-\/]/g, ' ').replace(/\s+/g, ' ').trim();
-            if (possibleName.length > 5) {
-              razaoPdf = possibleName;
-            }
-
-            matches.push({
-              id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
-              clienteId: client.id,
-              cliente: client,
-              razaoSocial: client.razao_social,
-              razaoSocialPdf: razaoPdf,
-              cnpj: client.cnpj,
-              inscricaoEstadual: cleanIE,
-              inscricaoEstadualFormatada: formatted,
-              tipoEdital: tipoEdital,
-              numeroEdital: numeroEdital,
-              arquivo: file.name,
-              pagina: page.pageNumber,
-              trechoOriginal: snippet,
-              dataProcessamento: new Date().toISOString(),
-              situacaoVisual: getSituacaoVisual(tipoEdital)
-            });
+        // ========================================================
+        // NÍVEL 1: CORRESPONDÊNCIA CONFIRMADA POR CNPJ
+        // ========================================================
+        const clientCleanCNPJ = normalizeCNPJ(client.cnpj);
+        if (clientCleanCNPJ && clientCleanCNPJ.length >= 11) {
+          if (lineCleanDigits.includes(clientCleanCNPJ) || line.includes(formatCNPJ(clientCleanCNPJ))) {
+            matched = true;
+            metodo = 'CNPJ';
           }
+        }
+
+        // ========================================================
+        // NÍVEL 2: CORRESPONDÊNCIA CONFIRMADA POR INSCRIÇÃO ESTADUAL
+        // ========================================================
+        if (!matched && client.inscricao_estadual) {
+          const clientCleanIE = normalizeIE(client.inscricao_estadual);
+          if (clientCleanIE) {
+            const formattedIE = formatIE(clientCleanIE);
+            if (line.includes(formattedIE) || lineCleanDigits.includes(clientCleanIE)) {
+              matched = true;
+              metodo = 'Inscrição Estadual';
+            }
+          }
+        }
+
+        // ========================================================
+        // NÍVEL 3: CORRESPONDÊNCIA POR RAZÃO SOCIAL
+        // ========================================================
+        if (!matched && client.razao_social) {
+          const matchResult = matchRazaoSocialInLine(client.razao_social, line);
+          if (matchResult.matched) {
+            matched = true;
+            similarityScore = matchResult.score;
+            metodo = matchResult.level === 'strong' ? 'Razão Social' : 'Razão Social – conferir';
+          }
+        }
+
+        if (matched) {
+          processedMatches.add(matchKey);
+
+          const snippet = line.trim();
+          const cleanIE = normalizeIE(client.inscricao_estadual);
+
+          matches.push({
+            id: 'match-' + Date.now().toString(36) + Math.random().toString(36).substr(2, 6),
+            clienteId: client.id,
+            cliente: client,
+            razaoSocial: client.razao_social,
+            razaoSocialPdf: client.razao_social,
+            cnpj: client.cnpj,
+            inscricaoEstadual: cleanIE || undefined,
+            inscricaoEstadualFormatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
+            tipoEdital: tipoEdital,
+            numeroEdital: numeroEdital,
+            arquivo: file.name,
+            pagina: page.pageNumber,
+            trechoOriginal: snippet,
+            dataProcessamento: new Date().toISOString(),
+            encontradoPor: metodo,
+            similaridade: similarityScore,
+            situacaoVisual: getSituacaoVisual(tipoEdital)
+          });
         }
       }
     }

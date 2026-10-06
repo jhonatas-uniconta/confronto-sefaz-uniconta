@@ -185,6 +185,7 @@ export const HistoricoEditaisView: React.FC = () => {
                       <th className="px-4 py-2.5">Cliente</th>
                       <th className="px-4 py-2.5">Inscrição Estadual</th>
                       <th className="px-4 py-2.5">CNPJ</th>
+                      <th className="px-4 py-2.5">Encontrado por</th>
                       <th className="px-4 py-2.5 text-center">Página</th>
                       <th className="px-4 py-2.5">Trecho Encontrado</th>
                     </tr>
@@ -200,11 +201,20 @@ export const HistoricoEditaisView: React.FC = () => {
                         <td className="px-4 py-2.5 font-semibold text-slate-900">
                           {res.razaoSocial}
                         </td>
-                        <td className="px-4 py-2.5 font-mono font-bold text-slate-800">
-                          {res.inscricaoEstadualFormatada || formatIE(res.inscricaoEstadual)}
+                        <td className="px-4 py-2.5 font-mono text-slate-800">
+                          {res.inscricaoEstadual ? (
+                            <span className="font-bold">{res.inscricaoEstadualFormatada || formatIE(res.inscricaoEstadual)}</span>
+                          ) : (
+                            <span className="text-slate-400 font-normal">Sem IE</span>
+                          )}
                         </td>
                         <td className="px-4 py-2.5 font-mono text-gray-600">
                           {res.cnpj ? formatCNPJ(res.cnpj) : '-'}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded text-[11px] font-medium border border-slate-200">
+                            {res.encontradoPor || 'Inscrição Estadual'}
+                          </span>
                         </td>
                         <td className="px-4 py-2.5 text-center font-bold text-blue-700">
                           {res.pagina}
