@@ -23,14 +23,8 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
   const [clients, setClients] = useState<Cliente[]>([]);
   const [loadingClients, setLoadingClients] = useState<boolean>(true);
-  const [history, setHistory] = useState<ConsultaEdital[]>(() => {
-    try {
-      const h = getConsultas();
-      return Array.isArray(h) ? h : [];
-    } catch {
-      return [];
-    }
-  });
+  const [history, setHistory] = useState<ConsultaEdital[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(true);
 
   useEffect(() => {
     let isMounted = true;
@@ -46,6 +40,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         if (isMounted) {
           setClients([]);
           setLoadingClients(false);
+        }
+      });
+
+    getConsultas()
+      .then((data) => {
+        if (isMounted) {
+          setHistory(Array.isArray(data) ? data : []);
+          setLoadingHistory(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Erro ao carregar histórico no Dashboard:', err);
+        if (isMounted) {
+          setHistory([]);
+          setLoadingHistory(false);
         }
       });
 
@@ -91,7 +100,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </div>
           <div>
             <span className="text-xs text-blue-400 block">Editais Processados</span>
-            <span className="text-2xl font-bold text-blue-300">{safeHistory.length}</span>
+            <span className="text-2xl font-bold text-blue-300">
+              {loadingHistory ? '...' : safeHistory.length}
+            </span>
           </div>
           <div>
             <span className="text-xs text-slate-400 block">Módulos Ativos</span>

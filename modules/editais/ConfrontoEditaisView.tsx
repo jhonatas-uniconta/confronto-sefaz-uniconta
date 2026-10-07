@@ -182,8 +182,8 @@ startxref
         totalPages += analysis.totalPages;
         totalIes += analysis.totalIesEncontradas;
 
-        // Auto-save each edital to history
-        saveConsulta({
+        // Auto-save each edital to history (Supabase)
+        await saveConsulta({
           data: new Date().toISOString(),
           nome_arquivo: analysis.fileName,
           numero_edital: analysis.numeroEdital,

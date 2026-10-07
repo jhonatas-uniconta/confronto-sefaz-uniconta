@@ -104,6 +104,128 @@ USING (true);
 -- Usuários sem login no Supabase Auth são bloqueados diretamente no banco de dados.
 `;
 
+/**
+ * SQL completo para criação das tabelas do Histórico de Confrontos de Editais
+ * e políticas RLS no Supabase.
+ */
+export const SUPABASE_HISTORICO_SQL_SCRIPT = `-- ==============================================================================
+-- SISTEMA FISCAL UNICONTA - HISTÓRICO DE CONFRONTOS DE EDITAIS
+-- Execute este script no SQL Editor do seu projeto Supabase (Dashboard -> SQL Editor)
+-- ==============================================================================
+
+-- 1. CRIAR TABELA DE CONSULTAS DE EDITAIS (CABEÇALHO)
+CREATE TABLE IF NOT EXISTS public.consultas_editais (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome_arquivo TEXT NOT NULL,
+    numero_edital VARCHAR(50),
+    tipo_documento VARCHAR(100),
+    quantidade_paginas INTEGER DEFAULT 0,
+    quantidade_ies INTEGER DEFAULT 0,
+    quantidade_clientes_encontrados INTEGER DEFAULT 0,
+    usuario_id UUID,
+    usuario_email TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    observacao TEXT
+);
+
+-- 2. CRIAR TABELA DE RESULTADOS DOS EDITAIS (DETALHES / CLIENTES ENCONTRADOS)
+CREATE TABLE IF NOT EXISTS public.resultados_editais (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    consulta_id UUID NOT NULL REFERENCES public.consultas_editais(id) ON DELETE CASCADE,
+    cliente_id UUID REFERENCES public.clientes(id) ON DELETE SET NULL,
+    razao_social TEXT NOT NULL,
+    razao_social_pdf TEXT,
+    cnpj VARCHAR(20),
+    inscricao_estadual VARCHAR(20),
+    inscricao_estadual_formatada VARCHAR(30),
+    tipo_edital VARCHAR(100),
+    numero_edital VARCHAR(50),
+    arquivo TEXT,
+    pagina INTEGER DEFAULT 1,
+    trecho_original TEXT,
+    encontrado_por VARCHAR(100),
+    similaridade NUMERIC(5,4),
+    situacao_texto TEXT,
+    situacao_tipo VARCHAR(20),
+    situacao_cor TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- 3. ÍNDICES DE PERFORMANCE
+CREATE INDEX IF NOT EXISTS idx_consultas_created_at ON public.consultas_editais (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_consultas_numero ON public.consultas_editais (numero_edital);
+CREATE INDEX IF NOT EXISTS idx_resultados_consulta_id ON public.resultados_editais (consulta_id);
+CREATE INDEX IF NOT EXISTS idx_resultados_razao ON public.resultados_editais (razao_social);
+CREATE INDEX IF NOT EXISTS idx_resultados_cnpj ON public.resultados_editais (cnpj);
+CREATE INDEX IF NOT EXISTS idx_resultados_ie ON public.resultados_editais (inscricao_estadual);
+
+-- 4. ROW LEVEL SECURITY (RLS)
+ALTER TABLE public.consultas_editais ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.resultados_editais ENABLE ROW LEVEL SECURITY;
+
+-- Revogar acesso anônimo (anon) e conceder aos usuários autenticados
+REVOKE ALL ON public.consultas_editais FROM anon;
+GRANT ALL ON public.consultas_editais TO authenticated;
+
+REVOKE ALL ON public.resultados_editais FROM anon;
+GRANT ALL ON public.resultados_editais TO authenticated;
+
+-- Limpar políticas anteriores para evitar duplicidade de nomes
+DROP POLICY IF EXISTS "Permitir SELECT consultas para autenticados" ON public.consultas_editais;
+DROP POLICY IF EXISTS "Permitir INSERT consultas para autenticados" ON public.consultas_editais;
+DROP POLICY IF EXISTS "Permitir UPDATE consultas para autenticados" ON public.consultas_editais;
+DROP POLICY IF EXISTS "Permitir DELETE consultas para autenticados" ON public.consultas_editais;
+
+DROP POLICY IF EXISTS "Permitir SELECT resultados para autenticados" ON public.resultados_editais;
+DROP POLICY IF EXISTS "Permitir INSERT resultados para autenticados" ON public.resultados_editais;
+DROP POLICY IF EXISTS "Permitir UPDATE resultados para autenticados" ON public.resultados_editais;
+DROP POLICY IF EXISTS "Permitir DELETE resultados para autenticados" ON public.resultados_editais;
+
+-- Políticas para consultas_editais
+CREATE POLICY "Permitir SELECT consultas para autenticados" 
+ON public.consultas_editais FOR SELECT 
+TO authenticated 
+USING (true);
+
+CREATE POLICY "Permitir INSERT consultas para autenticados" 
+ON public.consultas_editais FOR INSERT 
+TO authenticated 
+WITH CHECK (true);
+
+CREATE POLICY "Permitir UPDATE consultas para autenticados" 
+ON public.consultas_editais FOR UPDATE 
+TO authenticated 
+USING (true) 
+WITH CHECK (true);
+
+CREATE POLICY "Permitir DELETE consultas para autenticados" 
+ON public.consultas_editais FOR DELETE 
+TO authenticated 
+USING (true);
+
+-- Políticas para resultados_editais
+CREATE POLICY "Permitir SELECT resultados para autenticados" 
+ON public.resultados_editais FOR SELECT 
+TO authenticated 
+USING (true);
+
+CREATE POLICY "Permitir INSERT resultados para autenticados" 
+ON public.resultados_editais FOR INSERT 
+TO authenticated 
+WITH CHECK (true);
+
+CREATE POLICY "Permitir UPDATE resultados para autenticados" 
+ON public.resultados_editais FOR UPDATE 
+TO authenticated 
+USING (true) 
+WITH CHECK (true);
+
+CREATE POLICY "Permitir DELETE resultados para autenticados" 
+ON public.resultados_editais FOR DELETE 
+TO authenticated 
+USING (true);
+`;
+
 export interface SupabaseConfig {
   url?: string;
   anonKey?: string;
@@ -240,6 +362,74 @@ export const testSupabaseConnection = async (): Promise<{ success: boolean; mess
       success: false,
       message: err.message || 'Falha na conexão com o Supabase.',
       tableExists: false
+    };
+  }
+};
+
+/**
+ * Testa se as tabelas do Histórico de Editais (consultas_editais e resultados_editais) existem no Supabase
+ */
+export const testSupabaseHistoricoConnection = async (): Promise<{ success: boolean; message: string; tablesExist: boolean }> => {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: false,
+      message: 'Supabase não está configurado. Defina a URL e Anon Key.',
+      tablesExist: false
+    };
+  }
+
+  try {
+    const { error: cErr } = await client
+      .from('consultas_editais')
+      .select('id')
+      .limit(1);
+
+    if (cErr) {
+      if (cErr.code === '42P01' || cErr.message.includes('does not exist')) {
+        return {
+          success: true,
+          message: 'Tabela "consultas_editais" ainda não foi criada no Supabase. Execute o script SQL no editor do Supabase.',
+          tablesExist: false
+        };
+      }
+      return {
+        success: false,
+        message: `Erro na tabela de consultas: ${cErr.message}`,
+        tablesExist: false
+      };
+    }
+
+    const { error: rErr } = await client
+      .from('resultados_editais')
+      .select('id')
+      .limit(1);
+
+    if (rErr) {
+      if (rErr.code === '42P01' || rErr.message.includes('does not exist')) {
+        return {
+          success: true,
+          message: 'Tabela "resultados_editais" ainda não foi criada no Supabase. Execute o script SQL no editor do Supabase.',
+          tablesExist: false
+        };
+      }
+      return {
+        success: false,
+        message: `Erro na tabela de resultados: ${rErr.message}`,
+        tablesExist: false
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Tabelas "consultas_editais" e "resultados_editais" conectadas e operacionais no Supabase.',
+      tablesExist: true
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Falha na verificação das tabelas de histórico.',
+      tablesExist: false
     };
   }
 };
