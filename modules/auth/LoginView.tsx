@@ -6,22 +6,13 @@ import {
   EyeOff, 
   LogIn, 
   AlertCircle, 
-  Database, 
-  Settings, 
-  CheckCircle2, 
   ShieldCheck, 
-  Loader2, 
-  ServerCrash,
-  ChevronDown,
-  ChevronUp
+  Loader2
 } from 'lucide-react';
 import { UnicontaLogo } from '../../components/ui';
 import { signInWithPassword } from '../../services/authService';
-import { 
-  getSupabaseConfig, 
-  saveSupabaseConfig, 
-  testSupabaseConnection 
-} from '../../services/supabaseService';
+import { isSupabaseConfigured } from '../../services/supabaseService';
+import { SystemConfigMissing } from '../../components/SystemConfigMissing';
 
 interface LoginViewProps {
   onLoginSuccess: () => void;
@@ -34,32 +25,25 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Supabase Configuration State (for Vercel or local fallback)
-  const [config, setConfig] = useState(() => getSupabaseConfig());
-  const [showConfigSettings, setShowConfigSettings] = useState(!config.isConfigured);
-  const [inputUrl, setInputUrl] = useState(config.url || '');
-  const [inputKey, setInputKey] = useState(config.anonKey || '');
-  const [configFeedback, setConfigFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
-  const [testingConnection, setTestingConnection] = useState(false);
+  // Se a configuração do Supabase não estiver presente via variáveis de ambiente,
+  // exibe exclusivamente a tela amigável sem campos de URL ou chave
+  if (!isSupabaseConfigured()) {
+    return <SystemConfigMissing />;
+  }
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMessage(null);
 
-    if (!config.isConfigured) {
-      setErrorMessage('Configure a URL e a Anon Key do Supabase antes de realizar o login.');
-      setShowConfigSettings(true);
-      return;
-    }
-
-    if (!email.trim() || !password) {
+    const cleanEmail = email.trim();
+    if (!cleanEmail || !password) {
       setErrorMessage('Informe email e senha.');
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const result = await signInWithPassword(email, password);
+      const result = await signInWithPassword(cleanEmail, password);
       if (result.success) {
         onLoginSuccess();
       } else {
@@ -69,59 +53,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
       setErrorMessage(err?.message || 'Não foi possível conectar ao servidor.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  const handleSaveConfig = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setConfigFeedback(null);
-
-    const cleanUrl = inputUrl.trim();
-    const cleanKey = inputKey.trim();
-
-    if (!cleanUrl || !cleanKey) {
-      setConfigFeedback({
-        type: 'error',
-        message: 'Preencha a URL do projeto e a chave anônima (Anon Key).'
-      });
-      return;
-    }
-
-    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
-      setConfigFeedback({
-        type: 'error',
-        message: 'A URL do Supabase deve começar com https:// (ex: https://xyz.supabase.co).'
-      });
-      return;
-    }
-
-    saveSupabaseConfig(cleanUrl, cleanKey);
-    const updated = getSupabaseConfig();
-    setConfig(updated);
-
-    // Test connection
-    setTestingConnection(true);
-    try {
-      const testRes = await testSupabaseConnection();
-      if (testRes.success) {
-        setConfigFeedback({
-          type: 'success',
-          message: 'Conectado ao Supabase com sucesso!'
-        });
-        setErrorMessage(null);
-      } else {
-        setConfigFeedback({
-          type: 'info',
-          message: `Configuração salva. Nota: ${testRes.message}`
-        });
-      }
-    } catch (err: any) {
-      setConfigFeedback({
-        type: 'info',
-        message: 'Configuração salva no navegador.'
-      });
-    } finally {
-      setTestingConnection(false);
     }
   };
 
@@ -149,22 +80,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md relative z-10 px-4 sm:px-0">
         <div className="bg-[#1e293b]/90 backdrop-blur-md border border-slate-700/80 rounded-2xl shadow-2xl p-6 sm:p-8 space-y-6">
-          {/* Unconfigured Alert Banner */}
-          {!config.isConfigured && (
-            <div className="bg-amber-950/60 border border-amber-500/40 rounded-xl p-4 text-xs text-amber-200 space-y-2">
-              <div className="flex items-center gap-2 font-semibold text-amber-300">
-                <AlertCircle size={16} className="shrink-0 text-amber-400" />
-                <span>Configuração do Supabase Necessária</span>
-              </div>
-              <p className="text-slate-300 leading-relaxed">
-                As variáveis de ambiente (<code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300">VITE_SUPABASE_URL</code> e <code className="bg-slate-900 px-1 py-0.5 rounded text-amber-300">VITE_SUPABASE_ANON_KEY</code>) ainda não foram detectadas no ambiente.
-              </p>
-              <p className="text-slate-400">
-                Preencha os dados abaixo para conectar seu banco de dados agora ou adicione as variáveis no painel da Vercel.
-              </p>
-            </div>
-          )}
-
           {/* Error Message */}
           {errorMessage && (
             <div className="bg-red-950/70 border border-red-500/50 rounded-xl p-3.5 flex items-start gap-2.5 text-xs text-red-200 animate-in fade-in duration-200">
@@ -217,6 +132,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
                   onClick={() => setShowPassword(!showPassword)}
                   className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-200 transition-colors cursor-pointer"
                   tabIndex={-1}
+                  aria-label={showPassword ? 'Ocultar senha' : 'Exibir senha'}
                 >
                   {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
                 </button>
@@ -245,87 +161,6 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
           {/* Admin Note */}
           <div className="p-3 bg-slate-900/50 border border-slate-800 rounded-xl text-center text-[11px] text-slate-400 leading-relaxed">
             Não há cadastro público. As contas de acesso são criadas e gerenciadas exclusivamente pelo administrador no painel do Supabase.
-          </div>
-
-          {/* Config Drawer / Vercel Helper */}
-          <div className="pt-2 border-t border-slate-800/80">
-            <button
-              type="button"
-              onClick={() => setShowConfigSettings(!showConfigSettings)}
-              className="w-full flex items-center justify-between text-xs text-slate-400 hover:text-slate-200 transition-colors py-1 cursor-pointer"
-            >
-              <span className="flex items-center gap-1.5 font-medium">
-                <Database size={14} className={config.isConfigured ? 'text-emerald-400' : 'text-amber-400'} />
-                {config.isConfigured ? 'Supabase Conectado' : 'Configurar Conexão Supabase'}
-              </span>
-              {showConfigSettings ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
-
-            {showConfigSettings && (
-              <form onSubmit={handleSaveConfig} className="mt-3 p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-3 animate-in fade-in duration-150">
-                <div className="text-[11px] text-slate-400 leading-tight">
-                  Preencha os dados do seu projeto Supabase caso ainda não tenha configurado no painel da Vercel:
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    Project URL (VITE_SUPABASE_URL)
-                  </label>
-                  <input
-                    type="text"
-                    value={inputUrl}
-                    onChange={(e) => setInputUrl(e.target.value)}
-                    placeholder="https://xyzcompany.supabase.co"
-                    className="block w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs placeholder-slate-600 focus:ring-1 focus:ring-blue-500 font-mono"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[11px] font-medium text-slate-400 mb-1">
-                    API Anon Key (VITE_SUPABASE_ANON_KEY)
-                  </label>
-                  <input
-                    type="password"
-                    value={inputKey}
-                    onChange={(e) => setInputKey(e.target.value)}
-                    placeholder="eyJhbGciOiJIUzI1NiIsIn..."
-                    className="block w-full px-2.5 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-white text-xs placeholder-slate-600 focus:ring-1 focus:ring-blue-500 font-mono"
-                  />
-                </div>
-
-                {configFeedback && (
-                  <div className={`p-2 rounded-lg text-[11px] font-medium ${
-                    configFeedback.type === 'success' 
-                      ? 'bg-emerald-950/70 border border-emerald-500/50 text-emerald-300' 
-                      : configFeedback.type === 'error'
-                      ? 'bg-red-950/70 border border-red-500/50 text-red-300'
-                      : 'bg-blue-950/70 border border-blue-500/50 text-blue-300'
-                  }`}>
-                    {configFeedback.message}
-                  </div>
-                )}
-
-                <div className="flex gap-2 pt-1">
-                  <button
-                    type="submit"
-                    disabled={testingConnection}
-                    className="flex-1 py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs transition-colors border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
-                  >
-                    {testingConnection ? (
-                      <>
-                        <Loader2 size={13} className="animate-spin" />
-                        <span>Testando...</span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={13} />
-                        <span>Salvar e Conectar</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </form>
-            )}
           </div>
         </div>
 

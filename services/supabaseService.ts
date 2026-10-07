@@ -110,28 +110,41 @@ export interface SupabaseConfig {
   isConfigured: boolean;
 }
 
+// Segurança: Remove quaisquer credenciais legadas do Supabase que possam ter sido salvas anteriormente no localStorage
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('uniconta_supabase_url');
+    localStorage.removeItem('uniconta_supabase_anon_key');
+  } catch {}
+}
+
 /**
- * Lê a configuração do Supabase a partir de variáveis de ambiente ou armazenamento local seguro
+ * Lê a configuração do Supabase EXCLUSIVAMENTE a partir das variáveis de ambiente configuradas no Vercel/Vite.
+ * Não utiliza localStorage para credenciais e não permite configuração manual pelo navegador.
  */
 export const getSupabaseConfig = (): SupabaseConfig => {
   const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
   const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
 
-  const storageUrl = typeof window !== 'undefined' ? localStorage.getItem('uniconta_supabase_url') || '' : '';
-  const storageKey = typeof window !== 'undefined' ? localStorage.getItem('uniconta_supabase_anon_key') || '' : '';
+  const cleanUrl = typeof envUrl === 'string' ? envUrl.trim() : '';
+  const cleanKey = typeof envKey === 'string' ? envKey.trim() : '';
 
-  const url = (envUrl && !envUrl.includes('seu-projeto')) ? envUrl : storageUrl;
-  const anonKey = (envKey && !envKey.includes('sua-chave')) ? envKey : storageKey;
+  // Validar se não é placeholder e se possui URL válida
+  const isPlaceholderUrl = cleanUrl.includes('seu-projeto') || cleanUrl === '';
+  const isPlaceholderKey = cleanKey.includes('sua-chave') || cleanKey === '';
 
-  const cleanUrl = url ? url.trim() : '';
-  const cleanKey = anonKey ? anonKey.trim() : '';
+  const isValidUrl = Boolean(
+    !isPlaceholderUrl && 
+    (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://'))
+  );
+  const isValidKey = Boolean(!isPlaceholderKey && cleanKey.length > 0);
 
-  const isValidUrl = Boolean(cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')));
+  const isConfigured = Boolean(isValidUrl && isValidKey);
 
   return {
-    url: isValidUrl ? cleanUrl : undefined,
-    anonKey: cleanKey ? cleanKey : undefined,
-    isConfigured: Boolean(isValidUrl && cleanKey)
+    url: isConfigured ? cleanUrl : undefined,
+    anonKey: isConfigured ? cleanKey : undefined,
+    isConfigured
   };
 };
 
@@ -141,20 +154,12 @@ export const isSupabaseConfigured = (): boolean => {
 
 export const clearSupabaseConfig = (): void => {
   if (typeof window !== 'undefined') {
-    localStorage.removeItem('uniconta_supabase_url');
-    localStorage.removeItem('uniconta_supabase_anon_key');
+    try {
+      localStorage.removeItem('uniconta_supabase_url');
+      localStorage.removeItem('uniconta_supabase_anon_key');
+    } catch {}
   }
   supabaseInstance = null;
-  lastClientUrl = '';
-  lastClientKey = '';
-};
-
-export const saveSupabaseConfig = (url: string, anonKey: string): void => {
-  if (typeof window !== 'undefined') {
-    localStorage.setItem('uniconta_supabase_url', url.trim());
-    localStorage.setItem('uniconta_supabase_anon_key', anonKey.trim());
-  }
-  supabaseInstance = null; // Reinicializa cliente
   lastClientUrl = '';
   lastClientKey = '';
 };

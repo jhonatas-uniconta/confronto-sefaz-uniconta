@@ -18,7 +18,6 @@ import {
 } from '../../services/clientService';
 import { 
   getSupabaseConfig, 
-  saveSupabaseConfig, 
   testSupabaseConnection, 
   SUPABASE_SQL_SCRIPT 
 } from '../../services/supabaseService';
@@ -47,8 +46,6 @@ export const ClientesView: React.FC = () => {
   const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
   const [isDbConnected, setIsDbConnected] = useState<boolean | null>(null);
   const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [configUrl, setConfigUrl] = useState(supabaseConfig.url || '');
-  const [configKey, setConfigKey] = useState(supabaseConfig.anonKey || '');
   const [copiedSql, setCopiedSql] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
   const [connectionStatusText, setConnectionStatusText] = useState<string | null>(null);
@@ -272,13 +269,13 @@ export const ClientesView: React.FC = () => {
     }
   };
 
-  // Test Supabase Connection & Save
-  const handleSaveAndTestConfig = async () => {
+  // Test Supabase Connection using server environment variables
+  const handleTestConnection = async () => {
     setTestingConnection(true);
     setConnectionStatusText(null);
     try {
-      saveSupabaseConfig(configUrl, configKey);
-      setSupabaseConfig(getSupabaseConfig());
+      const currentConf = getSupabaseConfig();
+      setSupabaseConfig(currentConf);
       const res = await testSupabaseConnection();
       setIsDbConnected(res.tableExists);
       setConnectionStatusText(res.message);
@@ -1040,56 +1037,44 @@ export const ClientesView: React.FC = () => {
             </p>
           </div>
 
-          {/* Section 2: Credentials */}
+          {/* Section 2: Environment Status & Connection */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
             <span className="font-semibold text-slate-900 text-xs block">
-              Parâmetros de Conexão:
+              Variáveis de Ambiente do Sistema (Vercel):
             </span>
 
-            <div className="grid grid-cols-1 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  URL do Projeto Supabase:
-                </label>
-                <input
-                  type="text"
-                  placeholder="https://xyzcompany.supabase.co"
-                  value={configUrl}
-                  onChange={(e) => setConfigUrl(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-mono focus:ring-1 focus:ring-blue-500"
-                />
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200">
+                <span className="text-slate-600 font-medium">VITE_SUPABASE_URL</span>
+                <span className={`px-2 py-0.5 rounded text-[11px] font-mono ${supabaseConfig.url ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                  {supabaseConfig.url ? 'Configurada no ambiente' : 'Não configurada'}
+                </span>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
-                  Chave Anon/Public (anon key):
-                </label>
-                <input
-                  type="password"
-                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
-                  value={configKey}
-                  onChange={(e) => setConfigKey(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-mono focus:ring-1 focus:ring-blue-500"
-                />
+              <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200">
+                <span className="text-slate-600 font-medium">VITE_SUPABASE_ANON_KEY</span>
+                <span className={`px-2 py-0.5 rounded text-[11px] font-mono ${supabaseConfig.anonKey ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
+                  {supabaseConfig.anonKey ? 'Configurada no ambiente' : 'Não configurada'}
+                </span>
               </div>
             </div>
 
             <div className="flex justify-between items-center pt-2">
               <span className="text-[11px] text-slate-500">
-                As chaves também podem ser definidas via <code>.env</code> com <code>VITE_SUPABASE_URL</code>.
+                As credenciais são gerenciadas exclusivamente no painel do Vercel.
               </span>
               <Button
                 variant="primary"
                 size="sm"
-                onClick={handleSaveAndTestConfig}
-                disabled={testingConnection || !configUrl || !configKey}
+                onClick={handleTestConnection}
+                disabled={testingConnection || !supabaseConfig.isConfigured}
               >
                 {testingConnection ? (
                   <>
                     <Loader2 size={13} className="animate-spin" /> Testando...
                   </>
                 ) : (
-                  'Salvar e Testar Conexão'
+                  'Testar Conexão'
                 )}
               </Button>
             </div>

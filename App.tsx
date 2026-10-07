@@ -9,6 +9,7 @@ import { ConfrontoEditaisView } from './modules/editais/ConfrontoEditaisView';
 import { ClientesView } from './modules/clientes/ClientesView';
 import { HistoricoEditaisView } from './modules/historico/HistoricoEditaisView';
 import { LoginView } from './modules/auth/LoginView';
+import { SystemConfigMissing } from './components/SystemConfigMissing';
 import { UnicontaLogo } from './components/ui';
 import { getSupabaseClient, isSupabaseConfigured } from './services/supabaseService';
 import { getInitialSession, signOut } from './services/authService';
@@ -175,6 +176,11 @@ export const App: React.FC = () => {
       }
     };
   }, []);
+
+  // 0. Se as variáveis de ambiente do Supabase não estiverem configuradas no Vercel
+  if (!isSupabaseConfigured()) {
+    return <SystemConfigMissing />;
+  }
 
   // 1. Loading screen while checking session
   if (authLoading) {

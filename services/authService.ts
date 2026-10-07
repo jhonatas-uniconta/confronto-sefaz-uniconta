@@ -72,7 +72,7 @@ export const signInWithPassword = async (email: string, password: string): Promi
   if (!isSupabaseConfigured()) {
     return {
       success: false,
-      error: 'O Supabase ainda não foi configurado. Configure a URL e a Anon Key para continuar.'
+      error: 'Configuração do sistema incompleta. Entre em contato com o administrador.'
     };
   }
 
@@ -80,7 +80,7 @@ export const signInWithPassword = async (email: string, password: string): Promi
   if (!client) {
     return {
       success: false,
-      error: 'Não foi possível inicializar o cliente Supabase. Verifique a URL e a Anon Key informadas.'
+      error: 'Configuração do sistema incompleta. Entre em contato com o administrador.'
     };
   }
 
