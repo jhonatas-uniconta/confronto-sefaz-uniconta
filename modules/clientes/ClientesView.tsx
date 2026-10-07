@@ -94,9 +94,10 @@ export const ClientesView: React.FC = () => {
     setIsLoading(true);
     try {
       const data = await getClients();
-      setClients(data);
+      setClients(Array.isArray(data) ? data : []);
     } catch (e) {
       console.error('Erro ao atualizar clientes:', e);
+      setClients([]);
     } finally {
       setIsLoading(false);
     }
@@ -307,21 +308,24 @@ export const ClientesView: React.FC = () => {
   };
 
   // Filtered & Sorted Data
+  const safeClients = useMemo(() => Array.isArray(clients) ? clients : [], [clients]);
+
   const filteredClients = useMemo(() => {
-    return clients.filter(c => {
+    return safeClients.filter(c => {
+      if (!c) return false;
       const term = searchTerm.toLowerCase().trim();
       const matchesSearch = !term || (
-        c.razao_social.toLowerCase().includes(term) ||
+        (c.razao_social && c.razao_social.toLowerCase().includes(term)) ||
         (c.nome_fantasia && c.nome_fantasia.toLowerCase().includes(term)) ||
         (c.cnpj && c.cnpj.includes(term)) ||
-        c.inscricao_estadual.includes(term) ||
-        c.inscricao_estadual_formatada.includes(term) ||
+        (c.inscricao_estadual && c.inscricao_estadual.includes(term)) ||
+        (c.inscricao_estadual_formatada && c.inscricao_estadual_formatada.includes(term)) ||
         (c.codigo && c.codigo.toLowerCase().includes(term))
       );
 
       const matchesStatus = 
         statusFilter === 'all' || 
-        (statusFilter === 'active' && c.ativo) || 
+        (statusFilter === 'active' && Boolean(c.ativo)) || 
         (statusFilter === 'inactive' && !c.ativo);
 
       return matchesSearch && matchesStatus;
@@ -331,7 +335,7 @@ export const ClientesView: React.FC = () => {
       const cmp = String(valA).localeCompare(String(valB));
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [clients, searchTerm, statusFilter, sortField, sortDir]);
+  }, [safeClients, searchTerm, statusFilter, sortField, sortDir]);
 
   // Pagination
   const totalPages = Math.ceil(filteredClients.length / itemsPerPage) || 1;
@@ -473,9 +477,9 @@ export const ClientesView: React.FC = () => {
                 setCurrentPage(1);
               }}
             >
-              <option value="all">Todos os Status ({clients.length})</option>
-              <option value="active">Apenas Ativos ({clients.filter(c => c.ativo).length})</option>
-              <option value="inactive">Apenas Inativos ({clients.filter(c => !c.ativo).length})</option>
+              <option value="all">Todos os Status ({safeClients.length})</option>
+              <option value="active">Apenas Ativos ({safeClients.filter(c => c && c.ativo).length})</option>
+              <option value="inactive">Apenas Inativos ({safeClients.filter(c => c && !c.ativo).length})</option>
             </select>
           </div>
 

@@ -123,10 +123,12 @@ export const ConfrontoNotasView: React.FC = () => {
     setCurrentPage(1);
   };
 
+  const safeResults = useMemo(() => Array.isArray(results) ? results : [], [results]);
+
   const handleExportPDF = (onlyPending: boolean) => {
     const dataToExport = onlyPending 
-      ? results.filter(r => r.status === MatchStatus.MISSING_IN_ACCOUNTING && !r.situacaoSefaz.toLowerCase().includes('cancelada'))
-      : results;
+      ? safeResults.filter(r => r.status === MatchStatus.MISSING_IN_ACCOUNTING && !r.situacaoSefaz?.toLowerCase().includes('cancelada'))
+      : safeResults;
     
     exportToPdf(dataToExport, onlyPending ? 'Relatório de Pendências (Não Lançadas)' : 'Relatório Completo de Confronto');
   };
@@ -145,23 +147,23 @@ export const ConfrontoNotasView: React.FC = () => {
 
   const stats: SummaryStats = useMemo(() => {
     const s = {
-      total: results.length,
+      total: safeResults.length,
       matched: 0,
       missingInAccounting: 0,
       cancelled: 0,
       others: 0
     };
-    results.forEach(r => {
+    safeResults.forEach(r => {
       if (r.status === MatchStatus.MATCHED) s.matched++;
       else if (r.status === MatchStatus.MISSING_IN_ACCOUNTING) s.missingInAccounting++;
       else if (r.status === MatchStatus.CANCELLED) s.cancelled++;
       else s.others++;
     });
     return s;
-  }, [results]);
+  }, [safeResults]);
 
   const processedResults = useMemo(() => {
-    let data = results.filter(r => {
+    let data = safeResults.filter(r => {
         const matchesText = 
           r.numero?.toLowerCase().includes(filterText.toLowerCase()) || 
           r.chave?.includes(filterText) ||

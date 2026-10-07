@@ -55,7 +55,12 @@ export const ConfrontoEditaisView: React.FC = () => {
   const [activeClients, setActiveClients] = useState<Cliente[]>([]);
 
   useEffect(() => {
-    fetchActiveClientsForEdital().then(list => setActiveClients(list));
+    fetchActiveClientsForEdital()
+      .then(list => setActiveClients(Array.isArray(list) ? list : []))
+      .catch(err => {
+        console.error('Erro ao buscar clientes ativos:', err);
+        setActiveClients([]);
+      });
   }, []);
 
   // Handle file drop / select
@@ -154,7 +159,8 @@ startxref
       // Buscar os clientes ativos diretamente do Supabase antes de iniciar o confronto
       setProgressStep('Consultando clientes ativos no Supabase...');
       const freshActiveClients = await fetchActiveClientsForEdital();
-      setActiveClients(freshActiveClients);
+      const safeActiveClients = Array.isArray(freshActiveClients) ? freshActiveClients : [];
+      setActiveClients(safeActiveClients);
 
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
@@ -162,7 +168,7 @@ startxref
 
         const analysis = await processEditalPdf(
           file,
-          freshActiveClients,
+          safeActiveClients,
           undefined,
           (step, pct) => {
             const overallPct = Math.round(((i / selectedFiles.length) * 100) + (pct / selectedFiles.length));

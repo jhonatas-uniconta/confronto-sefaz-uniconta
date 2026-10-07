@@ -28,10 +28,12 @@ export const HistoricoEditaisView: React.FC = () => {
     }
   };
 
-  const filteredConsultas = consultas.filter(c => {
+  const safeConsultas = Array.isArray(consultas) ? consultas : [];
+  const filteredConsultas = safeConsultas.filter(c => {
+    if (!c) return false;
     const term = searchTerm.toLowerCase();
     return (
-      c.nome_arquivo.toLowerCase().includes(term) ||
+      (c.nome_arquivo && c.nome_arquivo.toLowerCase().includes(term)) ||
       (c.numero_edital && c.numero_edital.toLowerCase().includes(term)) ||
       (c.tipo_documento && c.tipo_documento.toLowerCase().includes(term)) ||
       (c.usuario && c.usuario.toLowerCase().includes(term))

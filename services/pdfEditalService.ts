@@ -257,7 +257,8 @@ export const processEditalPdf = async (
   if (onProgress) onProgress('Confrontando com clientes por CNPJ, IE e Razão Social...', 80);
 
   // Active clients to check (with or without IE!)
-  const activeClients = clients.filter(c => c.ativo !== false);
+  const safeClients = Array.isArray(clients) ? clients : [];
+  const activeClients = safeClients.filter(c => c && c.ativo !== false);
   const matches: EditalMatchResult[] = [];
   const processedMatches = new Set<string>(); // Avoid duplicate matches for same client on same page
   let totalIesFoundInDoc = 0;

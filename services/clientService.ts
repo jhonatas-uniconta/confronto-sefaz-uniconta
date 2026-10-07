@@ -207,20 +207,25 @@ export const getClients = async (): Promise<Cliente[]> => {
         .select('*')
         .order('razao_social', { ascending: true });
 
-      if (!error && data) {
+      if (error) {
+        console.warn('Erro ao carregar clientes do Supabase:', error.message);
+        return [];
+      }
+
+      if (Array.isArray(data)) {
         return data.map(mapRowToCliente);
       }
 
-      if (error) {
-        console.warn('Erro ao carregar clientes do Supabase:', error.message);
-      }
+      return [];
     } catch (err) {
       console.error('Falha de rede ao consultar Supabase:', err);
+      return [];
     }
   }
 
-  // Se Supabase não estiver configurado ou falhar, retorna dados locais
-  return getLocalClients();
+  // Se Supabase não estiver configurado, retorna dados locais
+  const local = getLocalClients();
+  return Array.isArray(local) ? local : [];
 };
 
 /**
@@ -441,16 +446,25 @@ export const fetchActiveClientsForEdital = async (): Promise<Cliente[]> => {
         .select('*')
         .eq('ativo', true);
 
-      if (!error && data && data.length > 0) {
+      if (error) {
+        console.warn('Erro ao consultar clientes ativos no Supabase:', error.message);
+        return [];
+      }
+
+      if (Array.isArray(data)) {
         return data.map(mapRowToCliente);
       }
+
+      return [];
     } catch (e) {
       console.warn('Erro ao consultar clientes ativos no Supabase:', e);
+      return [];
     }
   }
 
-  // Fallback
-  return getLocalClients().filter(c => c.ativo !== false);
+  // Fallback se Supabase não estiver configurado
+  const local = getLocalClients();
+  return Array.isArray(local) ? local.filter(c => c && c.ativo !== false) : [];
 };
 
 /**

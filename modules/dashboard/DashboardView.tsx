@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileSpreadsheet, 
   FileCheck2, 
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { Card, Button } from '../../components/ui';
 import { AppRoute } from '../../components/Sidebar';
+import { Cliente, ConsultaEdital } from '../../types';
 import { getClients } from '../../services/clientService';
 import { getConsultas } from '../../services/historyService';
 
@@ -20,9 +21,42 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
-  const clients = getClients();
-  const activeClients = clients.filter(c => c.ativo !== false);
-  const history = getConsultas();
+  const [clients, setClients] = useState<Cliente[]>([]);
+  const [loadingClients, setLoadingClients] = useState<boolean>(true);
+  const [history, setHistory] = useState<ConsultaEdital[]>(() => {
+    try {
+      const h = getConsultas();
+      return Array.isArray(h) ? h : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    getClients()
+      .then((data) => {
+        if (isMounted) {
+          setClients(Array.isArray(data) ? data : []);
+          setLoadingClients(false);
+        }
+      })
+      .catch((err) => {
+        console.error('Erro ao carregar clientes no Dashboard:', err);
+        if (isMounted) {
+          setClients([]);
+          setLoadingClients(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const safeClients = Array.isArray(clients) ? clients : [];
+  const activeClients = safeClients.filter(c => c && c.ativo !== false);
+  const safeHistory = Array.isArray(history) ? history : [];
 
   return (
     <div className="space-y-8 animate-fade-in">
@@ -45,15 +79,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6 pt-6 border-t border-slate-700/60">
           <div>
             <span className="text-xs text-slate-400 block">Clientes Cadastrados</span>
-            <span className="text-2xl font-bold text-white">{clients.length}</span>
+            <span className="text-2xl font-bold text-white">
+              {loadingClients ? '...' : safeClients.length}
+            </span>
           </div>
           <div>
             <span className="text-xs text-emerald-400 block">Clientes Ativos</span>
-            <span className="text-2xl font-bold text-emerald-400">{activeClients.length}</span>
+            <span className="text-2xl font-bold text-emerald-400">
+              {loadingClients ? '...' : activeClients.length}
+            </span>
           </div>
           <div>
             <span className="text-xs text-blue-400 block">Editais Processados</span>
-            <span className="text-2xl font-bold text-blue-300">{history.length}</span>
+            <span className="text-2xl font-bold text-blue-300">{safeHistory.length}</span>
           </div>
           <div>
             <span className="text-xs text-slate-400 block">Módulos Ativos</span>
