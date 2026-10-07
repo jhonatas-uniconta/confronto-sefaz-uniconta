@@ -35,7 +35,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isCollapsed,
   onToggleCollapse,
   isMobileOpen,
-  onCloseMobile
+  onCloseMobile,
+  userEmail,
+  onSignOut
 }) => {
   const navItems: { route: AppRoute; label: string; icon: React.ReactNode; badge?: string }[] = [
     { route: 'dashboard', label: 'Dashboard', icon: <LayoutDashboard size={20} /> },
