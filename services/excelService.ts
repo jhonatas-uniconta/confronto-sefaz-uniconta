@@ -10,7 +10,8 @@ import {
   sanitizeIE, 
   normalizeRazaoSocial 
 } from '../utils';
-import { getClients, saveClientsToStorage } from './clientService';
+import { getClients, saveClientsToStorage, getLocalClients } from './clientService';
+import { getSupabaseClient, mapClienteToRow } from './supabaseService';
 
 /**
  * Exports Edital confrontation results to Excel (.xlsx)
@@ -329,15 +330,14 @@ export const analyzeImport = (
  * Duplication rules:
  * - Razão Social PODE repetir.
  * - CNPJ e IE identificam clientes existentes para atualização se selecionado.
+ * Persiste diretamente na tabela clientes do Supabase (única fonte oficial).
  */
-export const executeImport = (
+export const executeImport = async (
   rows: any[],
   headers: string[],
   mappings: SpreadsheetColumnMapping[],
   updateExisting: boolean
-): { importedCount: number; updatedCount: number; skippedCount: number } => {
-  const currentClients = [...getClients()];
-
+): Promise<{ importedCount: number; updatedCount: number; skippedCount: number }> => {
   const getColIndex = (field: keyof Cliente) => {
     const m = mappings.find(item => item.campoDestino === field);
     return m ? headers.indexOf(m.colunaPlanilha) : -1;
@@ -358,6 +358,124 @@ export const executeImport = (
   const processedBatchCNPJs = new Set<string>();
   const processedBatchIEs = new Set<string>();
 
+  const supabase = getSupabaseClient();
+
+  if (supabase) {
+    try {
+      // 1. Carregar clientes atuais do Supabase
+      const { data: dbClients, error: fetchErr } = await supabase
+        .from('clientes')
+        .select('id, cnpj, inscricao_estadual, razao_social, nome_fantasia, codigo');
+
+      if (fetchErr) {
+        throw new Error(fetchErr.message);
+      }
+
+      const existingClients = dbClients || [];
+      const toInsert: any[] = [];
+
+      for (const row of rows) {
+        const rawRazao = idxRazao !== -1 ? row[idxRazao] : null;
+        const razaoSocial = rawRazao ? rawRazao.toString().trim().toUpperCase() : '';
+
+        if (!razaoSocial) {
+          skippedCount++;
+          continue;
+        }
+
+        const rawIE = idxIE !== -1 ? row[idxIE] : null;
+        const cleanIE = sanitizeIE(rawIE);
+
+        const rawCnpj = idxCnpj !== -1 ? row[idxCnpj] : '';
+        const cleanCnpj = sanitizeCNPJ(rawCnpj);
+        const fantasia = idxFantasia !== -1 && row[idxFantasia] ? row[idxFantasia].toString().trim().toUpperCase() : '';
+        const codigo = idxCodigo !== -1 && row[idxCodigo] ? row[idxCodigo].toString().trim() : '';
+
+        // Prevenir duplicidade dentro do próprio lote da planilha
+        if (cleanCnpj && cleanCnpj.length >= 11) {
+          if (processedBatchCNPJs.has(cleanCnpj)) {
+            skippedCount++;
+            continue;
+          }
+          processedBatchCNPJs.add(cleanCnpj);
+        }
+
+        if (cleanIE) {
+          if (processedBatchIEs.has(cleanIE)) {
+            skippedCount++;
+            continue;
+          }
+          processedBatchIEs.add(cleanIE);
+        }
+
+        // Buscar cliente existente por 1. CNPJ, 2. IE (NUNCA por Razão Social!)
+        const matchExisting = existingClients.find(c => {
+          const cCnpj = sanitizeCNPJ(c.cnpj);
+          if (cleanCnpj && cleanCnpj.length >= 11 && cCnpj && cCnpj === cleanCnpj) {
+            return true;
+          }
+          const cIe = sanitizeIE(c.inscricao_estadual);
+          if (cleanIE && cIe && cIe === cleanIE) {
+            return true;
+          }
+          return false;
+        });
+
+        if (matchExisting) {
+          if (updateExisting) {
+            const updatePayload = mapClienteToRow({
+              razao_social: razaoSocial,
+              nome_fantasia: fantasia || matchExisting.nome_fantasia,
+              cnpj: cleanCnpj || matchExisting.cnpj,
+              inscricao_estadual: cleanIE || matchExisting.inscricao_estadual,
+              codigo: codigo || matchExisting.codigo,
+              ativo: true
+            });
+
+            await supabase
+              .from('clientes')
+              .update(updatePayload)
+              .eq('id', matchExisting.id);
+
+            updatedCount++;
+          } else {
+            skippedCount++;
+          }
+        } else {
+          toInsert.push(mapClienteToRow({
+            codigo,
+            cnpj: cleanCnpj,
+            inscricao_estadual: cleanIE,
+            razao_social: razaoSocial,
+            nome_fantasia: fantasia,
+            ativo: true
+          }));
+          importedCount++;
+        }
+      }
+
+      if (toInsert.length > 0) {
+        // Inserção em lotes de até 500
+        const chunkSize = 500;
+        for (let i = 0; i < toInsert.length; i += chunkSize) {
+          const chunk = toInsert.slice(i, i + chunkSize);
+          const { error: insErr } = await supabase.from('clientes').insert(chunk);
+          if (insErr) {
+            console.error('Erro na inserção do lote de clientes no Supabase:', insErr.message);
+            throw insErr;
+          }
+        }
+      }
+
+      return { importedCount, updatedCount, skippedCount };
+    } catch (e) {
+      console.warn('Falha no Supabase durante importação. Usando fallback local:', e);
+    }
+  }
+
+  // Fallback local se o Supabase não estiver configurado
+  const currentClients = [...getLocalClients()];
+
   for (const row of rows) {
     const rawRazao = idxRazao !== -1 ? row[idxRazao] : null;
     const razaoSocial = rawRazao ? rawRazao.toString().trim().toUpperCase() : '';
@@ -375,7 +493,6 @@ export const executeImport = (
     const fantasia = idxFantasia !== -1 && row[idxFantasia] ? row[idxFantasia].toString().trim().toUpperCase() : '';
     const codigo = idxCodigo !== -1 && row[idxCodigo] ? row[idxCodigo].toString().trim() : '';
 
-    // Prevent duplicates within the batch
     if (cleanCnpj && cleanCnpj.length >= 11) {
       if (processedBatchCNPJs.has(cleanCnpj)) {
         skippedCount++;
@@ -392,7 +509,6 @@ export const executeImport = (
       processedBatchIEs.add(cleanIE);
     }
 
-    // Find existing match by 1. CNPJ, 2. IE (NEVER by Razão Social!)
     const existingIndex = currentClients.findIndex(c => {
       const cCnpj = sanitizeCNPJ(c.cnpj);
       if (cleanCnpj && cleanCnpj.length >= 11 && cCnpj && cCnpj === cleanCnpj) {

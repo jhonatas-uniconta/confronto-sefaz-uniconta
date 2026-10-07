@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Users, UserPlus, FileSpreadsheet, Search, Filter, 
   Edit2, Trash2, CheckCircle2, XCircle, ArrowUpDown, 
   ArrowUp, ArrowDown, ChevronLeft, ChevronRight, AlertTriangle, 
-  RotateCcw, Download, Check, HelpCircle
+  RotateCcw, Download, Check, HelpCircle, Database, Settings, 
+  Copy, CheckCheck, Loader2
 } from 'lucide-react';
 import { Cliente, SpreadsheetColumnMapping, ImportValidationSummary } from '../../types';
 import { 
@@ -11,8 +12,16 @@ import {
   createOrUpdateClient, 
   deleteClient, 
   toggleClientStatus, 
-  resetSampleClients 
+  resetSampleClients,
+  migrateLocalClientsToSupabase,
+  hasLocalClientsToMigrate
 } from '../../services/clientService';
+import { 
+  getSupabaseConfig, 
+  saveSupabaseConfig, 
+  testSupabaseConnection, 
+  SUPABASE_SQL_SCRIPT 
+} from '../../services/supabaseService';
 import { 
   parseClientSpreadsheet, 
   analyzeImport, 
@@ -25,8 +34,25 @@ import { formatIE, formatCNPJ, normalizeIE, normalizeCNPJ } from '../../utils';
 
 export const ClientesView: React.FC = () => {
   // Client state
-  const [clients, setClients] = useState<Cliente[]>(() => getClients());
+  const [clients, setClients] = useState<Cliente[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   
+  // Migration state
+  const [hasLocalMigrationAvailable, setHasLocalMigrationAvailable] = useState<boolean>(() => hasLocalClientsToMigrate());
+  const [isMigrating, setIsMigrating] = useState(false);
+  const [migrationMessage, setMigrationMessage] = useState<string | null>(null);
+
+  // Supabase connection state & modal
+  const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
+  const [isDbConnected, setIsDbConnected] = useState<boolean | null>(null);
+  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
+  const [configUrl, setConfigUrl] = useState(supabaseConfig.url || '');
+  const [configKey, setConfigKey] = useState(supabaseConfig.anonKey || '');
+  const [copiedSql, setCopiedSql] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionStatusText, setConnectionStatusText] = useState<string | null>(null);
+
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
@@ -66,9 +92,28 @@ export const ClientesView: React.FC = () => {
   // Delete modal state
   const [clientToDelete, setClientToDelete] = useState<Cliente | null>(null);
 
-  const refreshClients = () => {
-    setClients(getClients());
+  // Load clients directly from Supabase
+  const refreshClients = async () => {
+    setIsLoading(true);
+    try {
+      const data = await getClients();
+      setClients(data);
+    } catch (e) {
+      console.error('Erro ao atualizar clientes:', e);
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  useEffect(() => {
+    refreshClients();
+    testSupabaseConnection().then(res => {
+      setIsDbConnected(res.tableExists);
+      if (!res.tableExists && res.message) {
+        setConnectionStatusText(res.message);
+      }
+    });
+  }, []);
 
   // Open Create Modal
   const handleOpenCreateModal = () => {
@@ -96,49 +141,80 @@ export const ClientesView: React.FC = () => {
     setIsFormModalOpen(true);
   };
 
-  // Handle Save Client
-  const handleSaveClient = (e: React.FormEvent) => {
+  // Handle Save Client directly to Supabase
+  const handleSaveClient = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
+    setIsSaving(true);
 
-    const result = createOrUpdateClient({
-      id: editingClient?.id,
-      codigo: formCodigo,
-      cnpj: formCnpj,
-      inscricao_estadual: formIE,
-      razao_social: formRazao,
-      nome_fantasia: formFantasia,
-      ativo: formAtivo
-    });
+    try {
+      const result = await createOrUpdateClient({
+        id: editingClient?.id,
+        codigo: formCodigo,
+        cnpj: formCnpj,
+        inscricao_estadual: formIE,
+        razao_social: formRazao,
+        nome_fantasia: formFantasia,
+        ativo: formAtivo
+      });
 
-    if (!result.success) {
-      setFormError(result.error || 'Erro ao salvar cliente.');
+      if (!result.success) {
+        setFormError(result.error || 'Erro ao salvar cliente.');
+        return;
+      }
+
+      setIsFormModalOpen(false);
+      await refreshClients();
+    } catch (err: any) {
+      setFormError(err.message || 'Erro inesperado ao salvar cliente no Supabase.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Handle Toggle Status directly in Supabase
+  const handleToggleStatus = async (id: string, currentAtivo: boolean) => {
+    await toggleClientStatus(id, currentAtivo);
+    await refreshClients();
+  };
+
+  // Handle Delete directly in Supabase
+  const handleConfirmDelete = async () => {
+    if (!clientToDelete) return;
+    await deleteClient(clientToDelete.id);
+    setClientToDelete(null);
+    await refreshClients();
+  };
+
+  // Handle Migration from local storage to Supabase
+  const handleMigrateLocal = async () => {
+    if (!window.confirm('Deseja transferir os clientes armazenados localmente neste navegador para a tabela clientes no Supabase?')) {
       return;
     }
 
-    setIsFormModalOpen(false);
-    refreshClients();
-  };
-
-  // Handle Toggle Status
-  const handleToggleStatus = (id: string) => {
-    toggleClientStatus(id);
-    refreshClients();
-  };
-
-  // Handle Delete
-  const handleConfirmDelete = () => {
-    if (!clientToDelete) return;
-    deleteClient(clientToDelete.id);
-    setClientToDelete(null);
-    refreshClients();
+    setIsMigrating(true);
+    setMigrationMessage(null);
+    try {
+      const result = await migrateLocalClientsToSupabase();
+      if (result.success) {
+        setHasLocalMigrationAvailable(false);
+        setMigrationMessage(`${result.migratedCount} clientes migrados com sucesso para o banco Supabase! (${result.skippedCount} já existentes ignorados)`);
+        await refreshClients();
+      } else {
+        alert(result.error || 'Erro na migração.');
+      }
+    } catch (err: any) {
+      alert(`Falha durante a migração: ${err.message || err}`);
+    } finally {
+      setIsMigrating(false);
+    }
   };
 
   // Handle Reset Samples
-  const handleResetSamples = () => {
+  const handleResetSamples = async () => {
     if (window.confirm('Deseja recarregar a base padrão de clientes exemplo da Uniconta?')) {
       resetSampleClients();
-      refreshClients();
+      await refreshClients();
     }
   };
 
@@ -177,17 +253,51 @@ export const ClientesView: React.FC = () => {
     setImportStep('preview');
   };
 
-  // Execute Import
-  const handleExecuteImport = () => {
+  // Execute Import directly into Supabase
+  const handleExecuteImport = async () => {
     if (!parsedData) return;
-    const result = executeImport(parsedData.rows, parsedData.headers, mappings, updateExisting);
-    setIsImportModalOpen(false);
-    setImportStep('upload');
-    setParsedData(null);
-    setImportFile(null);
-    refreshClients();
-    alert(`Importação concluída com sucesso!\n• ${result.importedCount} novos clientes inseridos\n• ${result.updatedCount} clientes atualizados\n• ${result.skippedCount} registros ignorados`);
+    setImportLoading(true);
+    try {
+      const result = await executeImport(parsedData.rows, parsedData.headers, mappings, updateExisting);
+      setIsImportModalOpen(false);
+      setImportStep('upload');
+      setParsedData(null);
+      setImportFile(null);
+      await refreshClients();
+      alert(`Importação concluída com sucesso no Supabase!\n• ${result.importedCount} novos clientes inseridos\n• ${result.updatedCount} clientes atualizados\n• ${result.skippedCount} registros ignorados`);
+    } catch (err: any) {
+      alert(`Erro ao importar clientes no Supabase: ${err.message}`);
+    } finally {
+      setImportLoading(false);
+    }
   };
+
+  // Test Supabase Connection & Save
+  const handleSaveAndTestConfig = async () => {
+    setTestingConnection(true);
+    setConnectionStatusText(null);
+    try {
+      saveSupabaseConfig(configUrl, configKey);
+      setSupabaseConfig(getSupabaseConfig());
+      const res = await testSupabaseConnection();
+      setIsDbConnected(res.tableExists);
+      setConnectionStatusText(res.message);
+      if (res.tableExists) {
+        await refreshClients();
+      }
+    } catch (e: any) {
+      setConnectionStatusText(`Erro ao testar: ${e.message}`);
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  const handleCopySql = () => {
+    navigator.clipboard.writeText(SUPABASE_SQL_SCRIPT);
+    setCopiedSql(true);
+    setTimeout(() => setCopiedSql(false), 2500);
+  };
+
 
   // Sort Handler
   const handleSort = (field: keyof Cliente) => {
@@ -245,12 +355,22 @@ export const ClientesView: React.FC = () => {
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-5 rounded-xl border border-gray-200 shadow-sm">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-            <Users size={22} className="text-blue-600" />
-            Base de Clientes
-          </h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+              <Users size={22} className="text-blue-600" />
+              Base de Clientes
+            </h1>
+            <button
+              onClick={() => setIsConfigModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
+              title="Clique para ver o Script SQL e status da conexão com o Supabase"
+            >
+              <Database size={12} className="text-emerald-600" />
+              Supabase Oficial
+            </button>
+          </div>
           <p className="text-xs text-slate-500 mt-1">
-            Empresas cadastradas para verificação automática contra editais da SEFAZ-PE.
+            Empresas cadastradas para verificação automática contra editais da SEFAZ-PE. Banco centralizado no Supabase.
           </p>
         </div>
 
@@ -286,6 +406,48 @@ export const ClientesView: React.FC = () => {
           </Button>
         </div>
       </div>
+
+      {/* Migration Notice Banner (se existirem dados locais a migrar) */}
+      {hasLocalMigrationAvailable && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-blue-100 text-blue-700 rounded-lg shrink-0 mt-0.5">
+              <Database size={18} />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-blue-950">Migrar base local para o Supabase</h4>
+              <p className="text-xs text-blue-800 mt-0.5">
+                Detectamos clientes cadastrados no armazenamento local deste navegador. Você pode transferi-los para a tabela oficial do Supabase agora com validação de duplicidade por CNPJ e IE.
+              </p>
+            </div>
+          </div>
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={handleMigrateLocal}
+            disabled={isMigrating}
+            className="shrink-0"
+          >
+            {isMigrating ? (
+              <>
+                <Loader2 size={14} className="animate-spin" /> Migrando...
+              </>
+            ) : (
+              'Migrar base local para Supabase'
+            )}
+          </Button>
+        </div>
+      )}
+
+      {migrationMessage && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-xs text-emerald-800 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <span>{migrationMessage}</span>
+          </div>
+          <button onClick={() => setMigrationMessage(null)} className="text-emerald-600 hover:text-emerald-900 font-bold px-2">✕</button>
+        </div>
+      )}
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -387,7 +549,7 @@ export const ClientesView: React.FC = () => {
                   </td>
                   <td className="px-5 py-3 text-center">
                     <button
-                      onClick={() => handleToggleStatus(client.id)}
+                      onClick={() => handleToggleStatus(client.id, client.ativo)}
                       className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium cursor-pointer transition-colors ${
                         client.ativo 
                           ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200' 
@@ -420,13 +582,20 @@ export const ClientesView: React.FC = () => {
                 </tr>
               ))}
 
-              {paginatedClients.length === 0 && (
+              {isLoading ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                    Nenhum cliente encontrado com os filtros informados.
+                    <Loader2 size={24} className="animate-spin text-blue-600 mx-auto mb-2" />
+                    Carregando base de clientes do Supabase...
                   </td>
                 </tr>
-              )}
+              ) : paginatedClients.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
+                    Nenhum cliente encontrado no Supabase com os filtros informados.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
@@ -810,6 +979,127 @@ export const ClientesView: React.FC = () => {
               </div>
             </div>
           )}
+        </div>
+      </Modal>
+
+      {/* Modal: Configurações do Supabase & Script SQL Editor */}
+      <Modal
+        isOpen={isConfigModalOpen}
+        onClose={() => setIsConfigModalOpen(false)}
+        title="Configuração do Banco Oficial Supabase"
+        maxWidth="max-w-3xl"
+      >
+        <div className="space-y-5 text-sm">
+          {/* Status Banner */}
+          <div className={`p-4 rounded-xl border flex items-start gap-3 ${
+            isDbConnected 
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+              : 'bg-amber-50 border-amber-200 text-amber-900'
+          }`}>
+            <Database className="shrink-0 mt-0.5 text-blue-600" size={20} />
+            <div className="flex-1 text-xs">
+              <span className="font-bold block text-sm mb-0.5">
+                {isDbConnected ? 'Tabela "clientes" Conectada no Supabase' : 'Ação Necessária: Criar Tabela no Supabase'}
+              </span>
+              <p>
+                {connectionStatusText || (isDbConnected 
+                  ? 'A Base de Clientes está conectada diretamente ao Supabase. Todas as operações de listagem, inclusão, edição e confronto consultam o banco oficial.' 
+                  : 'Acesse o Supabase Dashboard, abra o SQL Editor, cole e execute o script abaixo para criar a tabela clientes e as políticas RLS.')}
+              </p>
+            </div>
+          </div>
+
+          {/* Section 1: SQL Script */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="font-semibold text-slate-900 text-xs">
+                Script SQL para executar no Supabase SQL Editor:
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCopySql}
+                className="text-xs"
+              >
+                {copiedSql ? (
+                  <>
+                    <CheckCheck size={14} className="text-emerald-600" /> Copiado!
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} /> Copiar SQL Completo
+                  </>
+                )}
+              </Button>
+            </div>
+            <pre className="bg-slate-900 text-slate-100 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-56 leading-relaxed select-all">
+              {SUPABASE_SQL_SCRIPT}
+            </pre>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Copie o código acima, cole no <strong>SQL Editor</strong> do seu projeto Supabase e clique em <strong>Run</strong>.
+            </p>
+          </div>
+
+          {/* Section 2: Credentials */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+            <span className="font-semibold text-slate-900 text-xs block">
+              Parâmetros de Conexão:
+            </span>
+
+            <div className="grid grid-cols-1 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  URL do Projeto Supabase:
+                </label>
+                <input
+                  type="text"
+                  placeholder="https://xyzcompany.supabase.co"
+                  value={configUrl}
+                  onChange={(e) => setConfigUrl(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-mono focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-1">
+                  Chave Anon/Public (anon key):
+                </label>
+                <input
+                  type="password"
+                  placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                  value={configKey}
+                  onChange={(e) => setConfigKey(e.target.value)}
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-xs font-mono focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-between items-center pt-2">
+              <span className="text-[11px] text-slate-500">
+                As chaves também podem ser definidas via <code>.env</code> com <code>VITE_SUPABASE_URL</code>.
+              </span>
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={handleSaveAndTestConfig}
+                disabled={testingConnection || !configUrl || !configKey}
+              >
+                {testingConnection ? (
+                  <>
+                    <Loader2 size={13} className="animate-spin" /> Testando...
+                  </>
+                ) : (
+                  'Salvar e Testar Conexão'
+                )}
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2 border-t border-gray-100">
+            <Button variant="outline" size="sm" onClick={() => setIsConfigModalOpen(false)}>
+              Fechar
+            </Button>
+          </div>
         </div>
       </Modal>
     </div>

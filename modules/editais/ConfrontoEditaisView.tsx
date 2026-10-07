@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   FileCheck2, Upload, Files, AlertTriangle, CheckCircle, 
   Download, Eye, FileText, RefreshCw, X, Info, Search, 
@@ -12,7 +12,7 @@ import {
   ConsultaEdital,
   MetodoIdentificacao
 } from '../../types';
-import { getClients } from '../../services/clientService';
+import { fetchActiveClientsForEdital } from '../../services/clientService';
 import { processEditalPdf, PdfDocumentAnalysis, getMetodoBadge } from '../../services/pdfEditalService';
 import { exportEditaisToExcel } from '../../services/excelService';
 import { saveConsulta } from '../../services/historyService';
@@ -51,9 +51,12 @@ export const ConfrontoEditaisView: React.FC = () => {
     page: 1
   });
 
-  // Client database
-  const clients = useMemo(() => getClients(), []);
-  const activeClients = useMemo(() => clients.filter(c => c.ativo !== false), [clients]);
+  // Client database loaded directly from Supabase
+  const [activeClients, setActiveClients] = useState<Cliente[]>([]);
+
+  useEffect(() => {
+    fetchActiveClientsForEdital().then(list => setActiveClients(list));
+  }, []);
 
   // Handle file drop / select
   const handleFilesSelected = (files: FileList | null) => {
@@ -148,13 +151,18 @@ startxref
       let totalPages = 0;
       let totalIes = 0;
 
+      // Buscar os clientes ativos diretamente do Supabase antes de iniciar o confronto
+      setProgressStep('Consultando clientes ativos no Supabase...');
+      const freshActiveClients = await fetchActiveClientsForEdital();
+      setActiveClients(freshActiveClients);
+
       for (let i = 0; i < selectedFiles.length; i++) {
         const file = selectedFiles[i];
         setProgressStep(`Processando ${file.name} (${i + 1} de ${selectedFiles.length})...`);
 
         const analysis = await processEditalPdf(
           file,
-          clients,
+          freshActiveClients,
           undefined,
           (step, pct) => {
             const overallPct = Math.round(((i / selectedFiles.length) * 100) + (pct / selectedFiles.length));

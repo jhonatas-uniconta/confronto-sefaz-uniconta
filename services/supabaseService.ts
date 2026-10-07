@@ -1,93 +1,51 @@
-/**
- * Supabase Integration Service
- * 
- * Provides SQL migration script and client-side REST sync when
- * VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are configured in the environment.
- */
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Cliente } from '../types';
+import { sanitizeCNPJ, sanitizeIE, formatCNPJ, formatIE } from '../utils';
 
+/**
+ * SQL completo para criação da tabela clientes e políticas RLS no Supabase.
+ * Execute no Supabase SQL Editor.
+ */
 export const SUPABASE_SQL_SCRIPT = `-- ==============================================================================
--- SISTEMA FISCAL UNICONTA - ESTRUTURA DE BANCO DE DADOS (SUPABASE / POSTGRESQL)
+-- SISTEMA FISCAL UNICONTA - TABELA E POLÍTICAS DA BASE DE CLIENTES
+-- Execute este script no SQL Editor do seu projeto Supabase (Dashboard -> SQL Editor)
 -- ==============================================================================
 
--- 1. TABELA DE CLIENTES
+-- 1. CRIAR OU AJUSTAR A TABELA DE CLIENTES
 CREATE TABLE IF NOT EXISTS public.clientes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     codigo VARCHAR(50),
-    cnpj VARCHAR(20),                     -- Opcional
-    inscricao_estadual VARCHAR(20),       -- Opcional (sem NOT NULL)
-    razao_social VARCHAR(255) NOT NULL,    -- Obrigatória, PODE REPETIR (sem UNIQUE)
-    nome_fantasia VARCHAR(255),
-    ativo BOOLEAN NOT NULL DEFAULT true,
+    cnpj VARCHAR(20),                     -- Normalizado (apenas números), opcional
+    inscricao_estadual VARCHAR(20),       -- Normalizada (apenas números), opcional
+    razao_social VARCHAR(255) NOT NULL,    -- Obrigatória, PODE REPETIR
+    nome_fantasia VARCHAR(255),           -- Opcional, pode repetir
+    ativo BOOLEAN NOT NULL DEFAULT true,  -- Ativo/Inativo
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_by TEXT                       -- Para auditoria (opcional)
 );
 
--- Ajuste de constraints caso a tabela já tenha sido criada anteriormente:
+-- Garantir que colunas estejam com as regras corretas caso a tabela já exista:
+ALTER TABLE public.clientes ALTER COLUMN razao_social SET NOT NULL;
+ALTER TABLE public.clientes ALTER COLUMN ativo SET DEFAULT true;
 ALTER TABLE public.clientes ALTER COLUMN inscricao_estadual DROP NOT NULL;
-DROP INDEX IF EXISTS idx_clientes_razao_unique;
-DROP INDEX IF EXISTS idx_clientes_ie;
+ALTER TABLE public.clientes ALTER COLUMN cnpj DROP NOT NULL;
 
--- Índices de performance e regras de unicidade:
--- A) Razão Social: índice de busca (NÃO possui restrição UNIQUE, permitindo repetições)
+-- 2. ÍNDICES DE PERFORMANCE E REGRAS DE DUPLICIDADE
+-- A) Razão Social: PODE REPETIR (índice comum de busca rápida, SEM restrição UNIQUE)
 CREATE INDEX IF NOT EXISTS idx_clientes_razao ON public.clientes (razao_social);
 
--- B) CNPJ: Único quando preenchido (impede duplicidade quando presente, permite nulos)
+-- B) CNPJ: NÃO PODE REPETIR quando preenchido (permite múltiplos nulos ou vazios)
 CREATE UNIQUE INDEX IF NOT EXISTS clientes_cnpj_unique
 ON public.clientes (cnpj)
 WHERE cnpj IS NOT NULL AND cnpj <> '';
 
--- C) Inscrição Estadual: Única quando preenchida (impede duplicidade quando presente, permite nulos)
+-- C) Inscrição Estadual: NÃO PODE REPETIR quando preenchida (permite múltiplos nulos ou vazios)
 CREATE UNIQUE INDEX IF NOT EXISTS clientes_ie_unique
 ON public.clientes (inscricao_estadual)
 WHERE inscricao_estadual IS NOT NULL AND inscricao_estadual <> '';
 
--- 2. TABELA DE CONSULTAS / HISTÓRICO DE EDITAIS
-CREATE TABLE IF NOT EXISTS public.consultas_editais (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    nome_arquivo VARCHAR(255) NOT NULL,
-    tipo_documento VARCHAR(255) NOT NULL,
-    numero_edital VARCHAR(50),
-    quantidade_paginas INTEGER NOT NULL DEFAULT 0,
-    quantidade_ies INTEGER NOT NULL DEFAULT 0,
-    quantidade_clientes_encontrados INTEGER NOT NULL DEFAULT 0,
-    usuario_id VARCHAR(100) DEFAULT 'digitalizacao@unicontacaruaru.com.br',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_consultas_created_at ON public.consultas_editais (created_at DESC);
-
--- 3. TABELA DE RESULTADOS DO CONFRONTO DE EDITAIS
-CREATE TABLE IF NOT EXISTS public.resultados_editais (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    consulta_id UUID NOT NULL REFERENCES public.consultas_editais(id) ON DELETE CASCADE,
-    cliente_id UUID REFERENCES public.clientes(id) ON DELETE SET NULL,
-    inscricao_estadual VARCHAR(20) NOT NULL,
-    pagina INTEGER NOT NULL,
-    trecho_original TEXT NOT NULL,
-    razao_social_pdf TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_resultados_consulta ON public.resultados_editais (consulta_id);
-CREATE INDEX IF NOT EXISTS idx_resultados_cliente ON public.resultados_editais (cliente_id);
-CREATE INDEX IF NOT EXISTS idx_resultados_ie ON public.resultados_editais (inscricao_estadual);
-
--- 4. SEGURANÇA: ROW LEVEL SECURITY (RLS)
-ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.consultas_editais ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.resultados_editais ENABLE ROW LEVEL SECURITY;
-
--- Políticas de acesso para uso autenticado / chave anônima da Uniconta
-CREATE POLICY "Acesso total aos clientes para usuários autorizados" 
-ON public.clientes FOR ALL USING (true) WITH CHECK (true);
-
-CREATE POLICY "Acesso total às consultas para usuários autorizados" 
-ON public.consultas_editais FOR ALL USING (true) WITH CHECK (true);
-
-CREATE POLICY "Acesso total aos resultados para usuários autorizados" 
-ON public.resultados_editais FOR ALL USING (true) WITH CHECK (true);
-
--- Trigger para atualização automática de updated_at em clientes
+-- 3. TRIGGER PARA ATUALIZAR AUTOMATICAMENTE updated_at
 CREATE OR REPLACE FUNCTION public.handle_updated_at()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -100,6 +58,46 @@ DROP TRIGGER IF EXISTS trigger_clientes_updated_at ON public.clientes;
 CREATE TRIGGER trigger_clientes_updated_at
 BEFORE UPDATE ON public.clientes
 FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
+
+-- 4. ROW LEVEL SECURITY (RLS)
+ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
+
+-- Remover políticas antigas para evitar duplicidade de nomes
+DROP POLICY IF EXISTS "Permitir SELECT para autenticados" ON public.clientes;
+DROP POLICY IF EXISTS "Permitir INSERT para autenticados" ON public.clientes;
+DROP POLICY IF EXISTS "Permitir UPDATE para autenticados" ON public.clientes;
+DROP POLICY IF EXISTS "Permitir DELETE para autenticados" ON public.clientes;
+DROP POLICY IF EXISTS "Acesso total aos clientes para usuários autorizados" ON public.clientes;
+
+-- 5. POLÍTICAS DE ACESSO
+-- Usuários autenticados acessam toda a Base de Clientes compartilhada (sem filtro por user_id)
+CREATE POLICY "Permitir SELECT para autenticados" 
+ON public.clientes FOR SELECT 
+TO authenticated 
+USING (true);
+
+CREATE POLICY "Permitir INSERT para autenticados" 
+ON public.clientes FOR INSERT 
+TO authenticated 
+WITH CHECK (true);
+
+CREATE POLICY "Permitir UPDATE para autenticados" 
+ON public.clientes FOR UPDATE 
+TO authenticated 
+USING (true) 
+WITH CHECK (true);
+
+CREATE POLICY "Permitir DELETE para autenticados" 
+ON public.clientes FOR DELETE 
+TO authenticated 
+USING (true);
+
+-- NOTA: Se você utiliza acesso via chave pública anônima no frontend (sem login Supabase Auth),
+-- você pode executar também as políticas para a role 'anon':
+-- CREATE POLICY "Permitir SELECT para anon" ON public.clientes FOR SELECT TO anon USING (true);
+-- CREATE POLICY "Permitir INSERT para anon" ON public.clientes FOR INSERT TO anon WITH CHECK (true);
+-- CREATE POLICY "Permitir UPDATE para anon" ON public.clientes FOR UPDATE TO anon USING (true) WITH CHECK (true);
+-- CREATE POLICY "Permitir DELETE para anon" ON public.clientes FOR DELETE TO anon USING (true);
 `;
 
 export interface SupabaseConfig {
@@ -108,12 +106,150 @@ export interface SupabaseConfig {
   isConfigured: boolean;
 }
 
+/**
+ * Lê a configuração do Supabase a partir de variáveis de ambiente ou armazenamento local seguro
+ */
 export const getSupabaseConfig = (): SupabaseConfig => {
-  const url = (import.meta as any).env?.VITE_SUPABASE_URL;
-  const anonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY;
+  const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
+  const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+
+  const storageUrl = typeof window !== 'undefined' ? localStorage.getItem('uniconta_supabase_url') || '' : '';
+  const storageKey = typeof window !== 'undefined' ? localStorage.getItem('uniconta_supabase_anon_key') || '' : '';
+
+  const url = (envUrl && !envUrl.includes('seu-projeto')) ? envUrl : storageUrl;
+  const anonKey = (envKey && !envKey.includes('sua-chave')) ? envKey : storageKey;
+
   return {
-    url,
-    anonKey,
+    url: url || undefined,
+    anonKey: anonKey || undefined,
     isConfigured: Boolean(url && anonKey)
+  };
+};
+
+export const saveSupabaseConfig = (url: string, anonKey: string): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.setItem('uniconta_supabase_url', url.trim());
+    localStorage.setItem('uniconta_supabase_anon_key', anonKey.trim());
+  }
+  supabaseInstance = null; // Reinicializa cliente
+};
+
+let supabaseInstance: SupabaseClient | null = null;
+let lastClientUrl = '';
+let lastClientKey = '';
+
+/**
+ * Retorna uma instância ativa do cliente Supabase ou null se não configurado
+ */
+export const getSupabaseClient = (): SupabaseClient | null => {
+  const config = getSupabaseConfig();
+  if (!config.isConfigured || !config.url || !config.anonKey) {
+    return null;
+  }
+
+  if (!supabaseInstance || lastClientUrl !== config.url || lastClientKey !== config.anonKey) {
+    try {
+      supabaseInstance = createClient(config.url, config.anonKey, {
+        auth: {
+          persistSession: true,
+          autoRefreshToken: true
+        }
+      });
+      lastClientUrl = config.url;
+      lastClientKey = config.anonKey;
+    } catch (e) {
+      console.error('Falha ao inicializar o cliente Supabase:', e);
+      return null;
+    }
+  }
+
+  return supabaseInstance;
+};
+
+/**
+ * Testa se a tabela clientes existe e é acessível no Supabase
+ */
+export const testSupabaseConnection = async (): Promise<{ success: boolean; message: string; tableExists: boolean }> => {
+  const client = getSupabaseClient();
+  if (!client) {
+    return {
+      success: false,
+      message: 'Supabase não está configurado. Defina a URL e Anon Key.',
+      tableExists: false
+    };
+  }
+
+  try {
+    const { data, error } = await client
+      .from('clientes')
+      .select('id')
+      .limit(1);
+
+    if (error) {
+      if (error.code === '42P01' || error.message.includes('relation "public.clientes" does not exist') || error.message.includes('clientes')) {
+        return {
+          success: true,
+          message: 'Conectado ao Supabase, mas a tabela "clientes" ainda não foi criada. Execute o script SQL no editor do Supabase.',
+          tableExists: false
+        };
+      }
+      return {
+        success: false,
+        message: `Erro do Supabase: ${error.message}`,
+        tableExists: false
+      };
+    }
+
+    return {
+      success: true,
+      message: 'Conexão ativa com a tabela "clientes" no Supabase.',
+      tableExists: true
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || 'Falha na conexão com o Supabase.',
+      tableExists: false
+    };
+  }
+};
+
+/**
+ * Converte um registro retornado do Supabase no formato Cliente da aplicação
+ */
+export const mapRowToCliente = (row: any): Cliente => {
+  const cleanIE = sanitizeIE(row.inscricao_estadual);
+  const cleanCNPJ = sanitizeCNPJ(row.cnpj);
+  return {
+    id: row.id,
+    codigo: row.codigo || '',
+    cnpj: cleanCNPJ ? formatCNPJ(cleanCNPJ) : '',
+    inscricao_estadual: cleanIE || '',
+    inscricao_estadual_formatada: cleanIE ? formatIE(cleanIE) : 'Sem IE',
+    razao_social: row.razao_social || '',
+    nome_fantasia: row.nome_fantasia || '',
+    ativo: row.ativo !== false,
+    created_at: row.created_at || new Date().toISOString(),
+    updated_at: row.updated_at || new Date().toISOString(),
+    created_by: row.created_by
+  };
+};
+
+/**
+ * Converte dados do Cliente para o formato salvo no banco do Supabase.
+ * Salva CNPJ e IE exclusivamente normalizados (apenas números ou null).
+ */
+export const mapClienteToRow = (client: Partial<Cliente>, userId?: string) => {
+  const cleanCNPJ = sanitizeCNPJ(client.cnpj);
+  const cleanIE = sanitizeIE(client.inscricao_estadual);
+  return {
+    codigo: client.codigo?.trim() || null,
+    cnpj: cleanCNPJ || null,                     // Apenas dígitos ou NULL
+    inscricao_estadual: cleanIE || null,         // Apenas dígitos ou NULL
+    razao_social: client.razao_social?.trim().toUpperCase(),
+    nome_fantasia: client.nome_fantasia?.trim().toUpperCase() || null,
+    ativo: client.ativo !== undefined ? client.ativo : true,
+    created_by: userId || client.created_by || 'digitalizacao@unicontacaruaru.com.br',
+    updated_at: new Date().toISOString()
   };
 };
