@@ -10,11 +10,13 @@ import {
   ExternalLink, 
   ShieldCheck, 
   X, 
-  Menu 
+  Menu,
+  LogOut,
+  UserCheck
 } from 'lucide-react';
 import { UnicontaLogo } from './ui';
 
-export type AppRoute = 'dashboard' | 'notas' | 'editais' | 'clientes' | 'historico-editais';
+export type AppRoute = 'dashboard' | 'notas' | 'editais' | 'clientes' | 'historico-editais' | 'login';
 
 interface SidebarProps {
   currentRoute: AppRoute;
@@ -23,6 +25,8 @@ interface SidebarProps {
   onToggleCollapse: () => void;
   isMobileOpen: boolean;
   onCloseMobile: () => void;
+  userEmail?: string | null;
+  onSignOut?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -154,7 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           onClick={onToggleCollapse}
           className={`
-            hidden lg:flex w-full items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-800/80 transition-all border border-slate-800
+            hidden lg:flex w-full items-center gap-2 px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-slate-800/80 transition-all border border-slate-800 cursor-pointer
             ${isCollapsed ? 'justify-center' : 'justify-between'}
           `}
           title={isCollapsed ? "Expandir menu lateral" : "Recolher menu lateral"}
@@ -163,15 +167,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {isCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
 
-        {/* User signature */}
+        {/* User Card & Logout Option */}
+        {onSignOut && (
+          <div className="pt-2 border-t border-slate-800/60">
+            {!isCollapsed ? (
+              <div className="flex items-center justify-between gap-2 p-2 bg-slate-900/60 rounded-xl border border-slate-800/70">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                    <UserCheck size={14} />
+                  </div>
+                  <div className="min-w-0">
+                    <span className="block text-[11px] font-medium text-slate-200 truncate" title={userEmail || 'Usuário Autenticado'}>
+                      {userEmail ? userEmail.split('@')[0] : 'Colaborador'}
+                    </span>
+                    <span className="block text-[9px] text-slate-400 truncate">
+                      Conectado
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  onClick={onSignOut}
+                  title="Sair da conta (Logout)"
+                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-lg transition-colors cursor-pointer"
+                >
+                  <LogOut size={16} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={onSignOut}
+                title="Sair da conta (Logout)"
+                className="w-full flex justify-center p-2 text-slate-400 hover:text-red-400 hover:bg-red-950/40 rounded-xl transition-colors cursor-pointer"
+              >
+                <LogOut size={18} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Version info */}
         {!isCollapsed && (
-          <div className="pt-2 px-1 text-[11px] text-slate-500 border-t border-slate-800/50 flex items-center justify-between">
-            <span className="truncate max-w-[140px]" title="digitalizacao@unicontacaruaru.com.br">
-              digitalizacao@uniconta
-            </span>
-            <span className="font-mono text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">
-              v3.0
-            </span>
+          <div className="px-1 text-[10px] text-slate-500 flex items-center justify-between">
+            <span className="truncate">Uniconta Assessoria</span>
+            <span className="font-mono bg-slate-800 px-1 py-0.5 rounded text-slate-400">v3.1</span>
           </div>
         )}
       </div>

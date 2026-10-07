@@ -62,15 +62,23 @@ FOR EACH ROW EXECUTE FUNCTION public.handle_updated_at();
 -- 4. ROW LEVEL SECURITY (RLS)
 ALTER TABLE public.clientes ENABLE ROW LEVEL SECURITY;
 
+-- Revogar acesso público (anon) e permitir acesso para autenticados
+REVOKE ALL ON public.clientes FROM anon;
+GRANT ALL ON public.clientes TO authenticated;
+
 -- Remover políticas antigas para evitar duplicidade de nomes
 DROP POLICY IF EXISTS "Permitir SELECT para autenticados" ON public.clientes;
 DROP POLICY IF EXISTS "Permitir INSERT para autenticados" ON public.clientes;
 DROP POLICY IF EXISTS "Permitir UPDATE para autenticados" ON public.clientes;
 DROP POLICY IF EXISTS "Permitir DELETE para autenticados" ON public.clientes;
 DROP POLICY IF EXISTS "Acesso total aos clientes para usuários autorizados" ON public.clientes;
+DROP POLICY IF EXISTS "Permitir SELECT para anon" ON public.clientes;
+DROP POLICY IF EXISTS "Permitir INSERT para anon" ON public.clientes;
+DROP POLICY IF EXISTS "Permitir UPDATE para anon" ON public.clientes;
+DROP POLICY IF EXISTS "Permitir DELETE para anon" ON public.clientes;
 
--- 5. POLÍTICAS DE ACESSO
--- Usuários autenticados acessam toda a Base de Clientes compartilhada (sem filtro por user_id)
+-- 5. POLÍTICAS DE ACESSO EXCLUSIVAS PARA USUÁRIOS AUTENTICADOS (Supabase Auth)
+-- Todos os colaboradores autenticados acessam a Base de Clientes compartilhada
 CREATE POLICY "Permitir SELECT para autenticados" 
 ON public.clientes FOR SELECT 
 TO authenticated 
@@ -92,12 +100,8 @@ ON public.clientes FOR DELETE
 TO authenticated 
 USING (true);
 
--- NOTA: Se você utiliza acesso via chave pública anônima no frontend (sem login Supabase Auth),
--- você pode executar também as políticas para a role 'anon':
--- CREATE POLICY "Permitir SELECT para anon" ON public.clientes FOR SELECT TO anon USING (true);
--- CREATE POLICY "Permitir INSERT para anon" ON public.clientes FOR INSERT TO anon WITH CHECK (true);
--- CREATE POLICY "Permitir UPDATE para anon" ON public.clientes FOR UPDATE TO anon USING (true) WITH CHECK (true);
--- CREATE POLICY "Permitir DELETE para anon" ON public.clientes FOR DELETE TO anon USING (true);
+-- IMPORTANTE: Nenhuma permissão de SELECT/INSERT/UPDATE/DELETE é concedida à role 'anon'.
+-- Usuários sem login no Supabase Auth são bloqueados diretamente no banco de dados.
 `;
 
 export interface SupabaseConfig {
@@ -119,11 +123,30 @@ export const getSupabaseConfig = (): SupabaseConfig => {
   const url = (envUrl && !envUrl.includes('seu-projeto')) ? envUrl : storageUrl;
   const anonKey = (envKey && !envKey.includes('sua-chave')) ? envKey : storageKey;
 
+  const cleanUrl = url ? url.trim() : '';
+  const cleanKey = anonKey ? anonKey.trim() : '';
+
+  const isValidUrl = Boolean(cleanUrl && (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://')));
+
   return {
-    url: url || undefined,
-    anonKey: anonKey || undefined,
-    isConfigured: Boolean(url && anonKey)
+    url: isValidUrl ? cleanUrl : undefined,
+    anonKey: cleanKey ? cleanKey : undefined,
+    isConfigured: Boolean(isValidUrl && cleanKey)
   };
+};
+
+export const isSupabaseConfigured = (): boolean => {
+  return getSupabaseConfig().isConfigured;
+};
+
+export const clearSupabaseConfig = (): void => {
+  if (typeof window !== 'undefined') {
+    localStorage.removeItem('uniconta_supabase_url');
+    localStorage.removeItem('uniconta_supabase_anon_key');
+  }
+  supabaseInstance = null;
+  lastClientUrl = '';
+  lastClientKey = '';
 };
 
 export const saveSupabaseConfig = (url: string, anonKey: string): void => {
@@ -132,6 +155,8 @@ export const saveSupabaseConfig = (url: string, anonKey: string): void => {
     localStorage.setItem('uniconta_supabase_anon_key', anonKey.trim());
   }
   supabaseInstance = null; // Reinicializa cliente
+  lastClientUrl = '';
+  lastClientKey = '';
 };
 
 let supabaseInstance: SupabaseClient | null = null;

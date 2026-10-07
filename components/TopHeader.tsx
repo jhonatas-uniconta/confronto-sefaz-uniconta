@@ -1,5 +1,5 @@
 import React from 'react';
-import { Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck } from 'lucide-react';
+import { Menu, PanelLeftClose, PanelLeftOpen, ShieldCheck, LogOut, User } from 'lucide-react';
 import { AppRoute } from './Sidebar';
 
 interface TopHeaderProps {
@@ -7,13 +7,17 @@ interface TopHeaderProps {
   onOpenMobileSidebar: () => void;
   isSidebarCollapsed: boolean;
   onToggleSidebarCollapse: () => void;
+  userEmail?: string | null;
+  onSignOut?: () => void;
 }
 
 export const TopHeader: React.FC<TopHeaderProps> = ({
   currentRoute,
   onOpenMobileSidebar,
   isSidebarCollapsed,
-  onToggleSidebarCollapse
+  onToggleSidebarCollapse,
+  userEmail,
+  onSignOut
 }) => {
   const routeTitles: Record<AppRoute, { title: string; subtitle: string }> = {
     dashboard: {
@@ -79,14 +83,34 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: Uniconta Badge */}
-        <div className="flex items-center gap-2">
+        {/* Right: User Email, Logout & Uniconta Badge */}
+        <div className="flex items-center gap-2 sm:gap-3">
           <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-medium border border-slate-200">
             <ShieldCheck size={13} className="text-blue-600" />
-            <span className="hidden sm:inline">Uniconta</span>
-            <span className="text-slate-400 hidden sm:inline">•</span>
+            <span className="hidden md:inline">Uniconta</span>
+            <span className="text-slate-400 hidden md:inline">•</span>
             <span>Caruaru/PE</span>
           </div>
+
+          {userEmail && (
+            <div className="hidden sm:flex items-center gap-1.5 text-xs text-slate-600 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-full">
+              <User size={12} className="text-slate-400" />
+              <span className="max-w-[150px] truncate font-medium text-slate-700" title={userEmail}>
+                {userEmail}
+              </span>
+            </div>
+          )}
+
+          {onSignOut && (
+            <button
+              onClick={onSignOut}
+              title="Sair da aplicação (Logout)"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-slate-600 hover:text-red-600 bg-white hover:bg-red-50 border border-slate-200 hover:border-red-200 rounded-lg transition-colors cursor-pointer"
+            >
+              <LogOut size={13} className="text-slate-500 hover:text-red-600" />
+              <span className="hidden sm:inline">Sair</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
