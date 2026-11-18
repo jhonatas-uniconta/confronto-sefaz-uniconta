@@ -15,19 +15,20 @@ import { isSupabaseConfigured } from '../../services/supabaseService';
 import { SystemConfigMissing } from '../../components/SystemConfigMissing';
 
 interface LoginViewProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (previewEmail?: string) => void;
+  isPreviewMode?: boolean;
 }
 
-export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
+export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess, isPreviewMode = false }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Se a configuração do Supabase não estiver presente via variáveis de ambiente,
+  // Se a configuração do Supabase não estiver presente via variáveis de ambiente (fora do Modo Preview),
   // exibe exclusivamente a tela amigável sem campos de URL ou chave
-  if (!isSupabaseConfigured()) {
+  if (!isSupabaseConfigured() && !isPreviewMode) {
     return <SystemConfigMissing />;
   }
 
@@ -36,6 +37,12 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
     setErrorMessage(null);
 
     const cleanEmail = email.trim();
+
+    if (isPreviewMode) {
+      onLoginSuccess(cleanEmail || 'digitalizacao@unicontacaruaru.com.br');
+      return;
+    }
+
     if (!cleanEmail || !password) {
       setErrorMessage('Informe email e senha.');
       return;
@@ -157,6 +164,24 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLoginSuccess }) => {
               )}
             </button>
           </form>
+
+          {/* Preview Mode Access (only shown in AI Studio Preview when Supabase env vars are absent) */}
+          {isPreviewMode && (
+            <div className="pt-2 border-t border-slate-700/80 space-y-3">
+              <div className="p-3 bg-blue-950/50 border border-blue-500/30 rounded-xl text-xs text-blue-200 leading-relaxed">
+                <strong className="block text-blue-100 mb-0.5">Modo Preview ativo</strong>
+                Ambiente de visualização sem conexão com o banco de produção. Utilize o botão abaixo para acessar diretamente com dados locais de demonstração.
+              </div>
+              <button
+                type="button"
+                onClick={() => onLoginSuccess('digitalizacao@unicontacaruaru.com.br')}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-blue-300 hover:text-white font-semibold text-sm transition-all border border-slate-600 cursor-pointer"
+              >
+                <LogIn size={16} />
+                <span>Entrar no Modo Preview</span>
+              </button>
+            </div>
+          )}
 
           {/* Admin Note */}
           <div className="p-3 bg-slate-900/50 border border-slate-800 rounded-xl text-center text-[11px] text-slate-400 leading-relaxed">

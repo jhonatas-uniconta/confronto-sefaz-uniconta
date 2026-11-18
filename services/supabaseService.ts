@@ -274,6 +274,27 @@ export const isSupabaseConfigured = (): boolean => {
   return getSupabaseConfig().isConfigured;
 };
 
+/**
+ * Detecta se a aplicação está rodando em ambiente de Preview / Desenvolvimento local
+ * (AI Studio Preview ou localhost). Nunca retorna true em domínios de produção (Vercel).
+ */
+export const isPreviewEnvironment = (): boolean => {
+  if (typeof window === 'undefined') return false;
+  const host = window.location.hostname.toLowerCase();
+  return (
+    ((host.startsWith('ais-dev-') || host.startsWith('ais-pre-')) && host.endsWith('.run.app')) ||
+    host === 'localhost' ||
+    host === '127.0.0.1'
+  );
+};
+
+/**
+ * Indica se o Modo Preview deve ser utilizado (apenas em ambiente de preview sem variáveis Supabase).
+ */
+export const isPreviewMode = (): boolean => {
+  return isPreviewEnvironment() && !isSupabaseConfigured();
+};
+
 export const clearSupabaseConfig = (): void => {
   if (typeof window !== 'undefined') {
     try {

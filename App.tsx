@@ -11,7 +11,7 @@ import { HistoricoEditaisView } from './modules/historico/HistoricoEditaisView';
 import { LoginView } from './modules/auth/LoginView';
 import { SystemConfigMissing } from './components/SystemConfigMissing';
 import { UnicontaLogo } from './components/ui';
-import { getSupabaseClient, isSupabaseConfigured } from './services/supabaseService';
+import { getSupabaseClient, isSupabaseConfigured, isPreviewMode } from './services/supabaseService';
 import { getInitialSession, signOut } from './services/authService';
 
 // Re-export existing types and services to preserve full backward compatibility
@@ -44,6 +44,7 @@ export const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
+  const previewMode = isPreviewMode();
 
   // Collapsible sidebar state (persisted in localStorage)
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -79,6 +80,22 @@ export const App: React.FC = () => {
     }
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Handle Preview Mode Login (only active when isPreviewMode() === true)
+  const handlePreviewLogin = (email?: string) => {
+    if (!previewMode) return;
+    const previewEmail = (email && email.trim()) || 'digitalizacao@unicontacaruaru.com.br';
+    setUser({
+      id: 'preview-user',
+      email: previewEmail,
+      app_metadata: {},
+      user_metadata: {},
+      aud: 'authenticated',
+      created_at: new Date().toISOString()
+    } as User);
+    setSession(null);
+    handleRouteChange('dashboard');
   };
 
   // Handle Logout
@@ -177,8 +194,8 @@ export const App: React.FC = () => {
     };
   }, []);
 
-  // 0. Se as variáveis de ambiente do Supabase não estiverem configuradas no Vercel
-  if (!isSupabaseConfigured()) {
+  // 0. Se as variáveis de ambiente do Supabase não estiverem configuradas no Vercel (fora do Modo Preview)
+  if (!isSupabaseConfigured() && !previewMode) {
     return <SystemConfigMissing />;
   }
 
@@ -204,7 +221,14 @@ export const App: React.FC = () => {
   if (!user || currentRoute === 'login') {
     return (
       <LoginView
-        onLoginSuccess={() => handleRouteChange('dashboard')}
+        isPreviewMode={previewMode}
+        onLoginSuccess={(previewEmail) => {
+          if (previewMode) {
+            handlePreviewLogin(previewEmail);
+          } else {
+            handleRouteChange('dashboard');
+          }
+        }}
       />
     );
   }

@@ -196,7 +196,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
       </div>
 
       {/* Auxiliary Modules & Quick Links */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         <div 
           onClick={() => onNavigate('clientes')}
           className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-sm cursor-pointer transition-all flex items-start gap-4"
@@ -226,6 +226,26 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
             </p>
           </div>
         </div>
+
+        <a 
+          href="https://uniconta-certificados.vercel.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="bg-white p-5 rounded-xl border border-gray-200 hover:border-blue-400 hover:shadow-sm cursor-pointer transition-all flex items-start gap-4"
+        >
+          <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg shrink-0">
+            <ShieldCheck size={20} />
+          </div>
+          <div>
+            <div className="flex items-center gap-1">
+              <h3 className="font-semibold text-slate-900 text-sm">Certificados Digitais</h3>
+              <ExternalLink size={12} className="text-slate-400" />
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Acesse o controle de certificados digitais de clientes em uma nova aba.
+            </p>
+          </div>
+        </a>
 
         <a 
           href="https://efisco.sefaz.pe.gov.br/"
