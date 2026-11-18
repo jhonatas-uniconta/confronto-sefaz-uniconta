@@ -137,6 +137,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </button>
           );
         })}
+
+        {/* Certificados Digitais (Sistema Externo Uniconta) */}
+        <a
+          href="https://uniconta-certificados.vercel.app"
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={onCloseMobile}
+          title={isCollapsed ? "Certificados Digitais" : undefined}
+          className={`
+            w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all group relative
+            text-slate-300 hover:text-white hover:bg-slate-800/80
+            ${isCollapsed ? 'justify-center' : 'justify-start'}
+          `}
+        >
+          <div className="shrink-0 transition-transform group-hover:scale-105">
+            <ShieldCheck size={20} />
+          </div>
+
+          {!isCollapsed && (
+            <div className="flex-1 flex items-center justify-between truncate">
+              <span className="truncate">Certificados Digitais</span>
+              <ExternalLink size={14} className="text-slate-400 group-hover:text-slate-200 shrink-0 ml-2 transition-colors" />
+            </div>
+          )}
+
+          {/* Floating Tooltip when collapsed */}
+          {isCollapsed && (
+            <div className="hidden lg:group-hover:flex absolute left-full ml-3 px-3 py-1.5 bg-slate-900 text-white text-xs font-semibold rounded-lg shadow-xl z-50 whitespace-nowrap items-center gap-1.5 border border-slate-700 pointer-events-none">
+              <span>Certificados Digitais</span>
+              <ExternalLink size={11} className="text-slate-400" />
+            </div>
+          )}
+        </a>
       </nav>
 
       {/* Footer Area */}

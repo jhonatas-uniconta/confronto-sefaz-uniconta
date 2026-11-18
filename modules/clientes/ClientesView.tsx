@@ -3,8 +3,8 @@ import {
   Users, UserPlus, FileSpreadsheet, Search, Filter, 
   Edit2, Trash2, CheckCircle2, XCircle, ArrowUpDown, 
   ArrowUp, ArrowDown, ChevronLeft, ChevronRight, AlertTriangle, 
-  RotateCcw, Download, Check, HelpCircle, Database, Settings, 
-  Copy, CheckCheck, Loader2
+  RotateCcw, Download, Check, HelpCircle, Database, 
+  Loader2
 } from 'lucide-react';
 import { Cliente, SpreadsheetColumnMapping, ImportValidationSummary } from '../../types';
 import { 
@@ -12,15 +12,8 @@ import {
   createOrUpdateClient, 
   deleteClient, 
   toggleClientStatus, 
-  resetSampleClients,
-  migrateLocalClientsToSupabase,
-  hasLocalClientsToMigrate
+  resetSampleClients
 } from '../../services/clientService';
-import { 
-  getSupabaseConfig, 
-  testSupabaseConnection, 
-  SUPABASE_SQL_SCRIPT 
-} from '../../services/supabaseService';
 import { 
   parseClientSpreadsheet, 
   analyzeImport, 
@@ -36,19 +29,6 @@ export const ClientesView: React.FC = () => {
   const [clients, setClients] = useState<Cliente[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  
-  // Migration state
-  const [hasLocalMigrationAvailable, setHasLocalMigrationAvailable] = useState<boolean>(() => hasLocalClientsToMigrate());
-  const [isMigrating, setIsMigrating] = useState(false);
-  const [migrationMessage, setMigrationMessage] = useState<string | null>(null);
-
-  // Supabase connection state & modal
-  const [supabaseConfig, setSupabaseConfig] = useState(() => getSupabaseConfig());
-  const [isDbConnected, setIsDbConnected] = useState<boolean | null>(null);
-  const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
-  const [testingConnection, setTestingConnection] = useState(false);
-  const [connectionStatusText, setConnectionStatusText] = useState<string | null>(null);
 
   // Search & Filter
   const [searchTerm, setSearchTerm] = useState('');
@@ -105,12 +85,6 @@ export const ClientesView: React.FC = () => {
 
   useEffect(() => {
     refreshClients();
-    testSupabaseConnection().then(res => {
-      setIsDbConnected(res.tableExists);
-      if (!res.tableExists && res.message) {
-        setConnectionStatusText(res.message);
-      }
-    });
   }, []);
 
   // Open Create Modal
@@ -184,30 +158,6 @@ export const ClientesView: React.FC = () => {
     await refreshClients();
   };
 
-  // Handle Migration from local storage to Supabase
-  const handleMigrateLocal = async () => {
-    if (!window.confirm('Deseja transferir os clientes armazenados localmente neste navegador para a tabela clientes no Supabase?')) {
-      return;
-    }
-
-    setIsMigrating(true);
-    setMigrationMessage(null);
-    try {
-      const result = await migrateLocalClientsToSupabase();
-      if (result.success) {
-        setHasLocalMigrationAvailable(false);
-        setMigrationMessage(`${result.migratedCount} clientes migrados com sucesso para o banco Supabase! (${result.skippedCount} já existentes ignorados)`);
-        await refreshClients();
-      } else {
-        alert(result.error || 'Erro na migração.');
-      }
-    } catch (err: any) {
-      alert(`Falha durante a migração: ${err.message || err}`);
-    } finally {
-      setIsMigrating(false);
-    }
-  };
-
   // Handle Reset Samples
   const handleResetSamples = async () => {
     if (window.confirm('Deseja recarregar a base padrão de clientes exemplo da Uniconta?')) {
@@ -270,31 +220,6 @@ export const ClientesView: React.FC = () => {
     }
   };
 
-  // Test Supabase Connection using server environment variables
-  const handleTestConnection = async () => {
-    setTestingConnection(true);
-    setConnectionStatusText(null);
-    try {
-      const currentConf = getSupabaseConfig();
-      setSupabaseConfig(currentConf);
-      const res = await testSupabaseConnection();
-      setIsDbConnected(res.tableExists);
-      setConnectionStatusText(res.message);
-      if (res.tableExists) {
-        await refreshClients();
-      }
-    } catch (e: any) {
-      setConnectionStatusText(`Erro ao testar: ${e.message}`);
-    } finally {
-      setTestingConnection(false);
-    }
-  };
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_SQL_SCRIPT);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2500);
-  };
 
 
   // Sort Handler
@@ -361,14 +286,10 @@ export const ClientesView: React.FC = () => {
               <Users size={22} className="text-blue-600" />
               Base de Clientes
             </h1>
-            <button
-              onClick={() => setIsConfigModalOpen(true)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 transition-colors"
-              title="Clique para ver o Script SQL e status da conexão com o Supabase"
-            >
+            <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
               <Database size={12} className="text-emerald-600" />
-              Supabase Oficial
-            </button>
+              Base Centralizada
+            </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
             Empresas cadastradas para verificação automática contra editais da SEFAZ-PE. Banco centralizado no Supabase.
@@ -407,48 +328,6 @@ export const ClientesView: React.FC = () => {
           </Button>
         </div>
       </div>
-
-      {/* Migration Notice Banner (se existirem dados locais a migrar) */}
-      {hasLocalMigrationAvailable && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-blue-100 text-blue-700 rounded-lg shrink-0 mt-0.5">
-              <Database size={18} />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-blue-950">Migrar base local para o Supabase</h4>
-              <p className="text-xs text-blue-800 mt-0.5">
-                Detectamos clientes cadastrados no armazenamento local deste navegador. Você pode transferi-los para a tabela oficial do Supabase agora com validação de duplicidade por CNPJ e IE.
-              </p>
-            </div>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleMigrateLocal}
-            disabled={isMigrating}
-            className="shrink-0"
-          >
-            {isMigrating ? (
-              <>
-                <Loader2 size={14} className="animate-spin" /> Migrando...
-              </>
-            ) : (
-              'Migrar base local para Supabase'
-            )}
-          </Button>
-        </div>
-      )}
-
-      {migrationMessage && (
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 flex items-center justify-between text-xs text-emerald-800 animate-fade-in">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
-            <span>{migrationMessage}</span>
-          </div>
-          <button onClick={() => setMigrationMessage(null)} className="text-emerald-600 hover:text-emerald-900 font-bold px-2">✕</button>
-        </div>
-      )}
 
       {/* Filter and Search Bar */}
       <div className="bg-white p-4 rounded-xl border border-gray-200 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
@@ -980,115 +859,6 @@ export const ClientesView: React.FC = () => {
               </div>
             </div>
           )}
-        </div>
-      </Modal>
-
-      {/* Modal: Configurações do Supabase & Script SQL Editor */}
-      <Modal
-        isOpen={isConfigModalOpen}
-        onClose={() => setIsConfigModalOpen(false)}
-        title="Configuração do Banco Oficial Supabase"
-        maxWidth="max-w-3xl"
-      >
-        <div className="space-y-5 text-sm">
-          {/* Status Banner */}
-          <div className={`p-4 rounded-xl border flex items-start gap-3 ${
-            isDbConnected 
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-              : 'bg-amber-50 border-amber-200 text-amber-900'
-          }`}>
-            <Database className="shrink-0 mt-0.5 text-blue-600" size={20} />
-            <div className="flex-1 text-xs">
-              <span className="font-bold block text-sm mb-0.5">
-                {isDbConnected ? 'Tabela "clientes" Conectada no Supabase' : 'Ação Necessária: Criar Tabela no Supabase'}
-              </span>
-              <p>
-                {connectionStatusText || (isDbConnected 
-                  ? 'A Base de Clientes está conectada diretamente ao Supabase. Todas as operações de listagem, inclusão, edição e confronto consultam o banco oficial.' 
-                  : 'Acesse o Supabase Dashboard, abra o SQL Editor, cole e execute o script abaixo para criar a tabela clientes e as políticas RLS.')}
-              </p>
-            </div>
-          </div>
-
-          {/* Section 1: SQL Script */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="font-semibold text-slate-900 text-xs">
-                Script SQL para executar no Supabase SQL Editor:
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleCopySql}
-                className="text-xs"
-              >
-                {copiedSql ? (
-                  <>
-                    <CheckCheck size={14} className="text-emerald-600" /> Copiado!
-                  </>
-                ) : (
-                  <>
-                    <Copy size={14} /> Copiar SQL Completo
-                  </>
-                )}
-              </Button>
-            </div>
-            <pre className="bg-slate-900 text-slate-100 p-3 rounded-lg text-xs font-mono overflow-x-auto max-h-56 leading-relaxed select-all">
-              {SUPABASE_SQL_SCRIPT}
-            </pre>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Copie o código acima, cole no <strong>SQL Editor</strong> do seu projeto Supabase e clique em <strong>Run</strong>.
-            </p>
-          </div>
-
-          {/* Section 2: Environment Status & Connection */}
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
-            <span className="font-semibold text-slate-900 text-xs block">
-              Variáveis de Ambiente do Sistema (Vercel):
-            </span>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200">
-                <span className="text-slate-600 font-medium">VITE_SUPABASE_URL</span>
-                <span className={`px-2 py-0.5 rounded text-[11px] font-mono ${supabaseConfig.url ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                  {supabaseConfig.url ? 'Configurada no ambiente' : 'Não configurada'}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between p-2.5 bg-white rounded-lg border border-slate-200">
-                <span className="text-slate-600 font-medium">VITE_SUPABASE_ANON_KEY</span>
-                <span className={`px-2 py-0.5 rounded text-[11px] font-mono ${supabaseConfig.anonKey ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200'}`}>
-                  {supabaseConfig.anonKey ? 'Configurada no ambiente' : 'Não configurada'}
-                </span>
-              </div>
-            </div>
-
-            <div className="flex justify-between items-center pt-2">
-              <span className="text-[11px] text-slate-500">
-                As credenciais são gerenciadas exclusivamente no painel do Vercel.
-              </span>
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleTestConnection}
-                disabled={testingConnection || !supabaseConfig.isConfigured}
-              >
-                {testingConnection ? (
-                  <>
-                    <Loader2 size={13} className="animate-spin" /> Testando...
-                  </>
-                ) : (
-                  'Testar Conexão'
-                )}
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2 border-t border-gray-100">
-            <Button variant="outline" size="sm" onClick={() => setIsConfigModalOpen(false)}>
-              Fechar
-            </Button>
-          </div>
         </div>
       </Modal>
     </div>

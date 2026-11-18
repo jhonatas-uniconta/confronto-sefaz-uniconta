@@ -2,21 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { 
   History, Calendar, FileText, Download, Eye, 
   Trash2, Search, Filter, AlertCircle, ArrowRight,
-  Loader2, Database, Copy, Check, RefreshCw, Sparkles
+  Loader2, Database, RefreshCw
 } from 'lucide-react';
 import { ConsultaEdital, EditalMatchResult } from '../../types';
 import { 
   getConsultas, 
   getConsultaById, 
-  deleteConsulta, 
-  hasLocalHistoryToMigrate, 
-  migrateLocalHistoryToSupabase 
+  deleteConsulta
 } from '../../services/historyService';
-import { 
-  SUPABASE_HISTORICO_SQL_SCRIPT, 
-  testSupabaseHistoricoConnection,
-  isSupabaseConfigured 
-} from '../../services/supabaseService';
 import { exportEditaisToExcel } from '../../services/excelService';
 import { Card, Button, Modal } from '../../components/ui';
 import { formatIE, formatCNPJ } from '../../utils';
@@ -33,16 +26,6 @@ export const HistoricoEditaisView: React.FC = () => {
   // Modal for Viewing Reopened Results
   const [selectedConsulta, setSelectedConsulta] = useState<ConsultaEdital | null>(null);
 
-  // Migration of local history to Supabase
-  const [hasLocalMigration, setHasLocalMigration] = useState<boolean>(() => hasLocalHistoryToMigrate());
-  const [isMigrating, setIsMigrating] = useState(false);
-  const [migrationMessage, setMigrationMessage] = useState<string | null>(null);
-
-  // Database verification & SQL Script Modal
-  const [isSqlModalOpen, setIsSqlModalOpen] = useState(false);
-  const [copiedSql, setCopiedSql] = useState(false);
-  const [tableStatus, setTableStatus] = useState<{ checked: boolean; exists: boolean; message: string } | null>(null);
-
   const fetchConsultas = async () => {
     setIsLoading(true);
     try {
@@ -58,21 +41,6 @@ export const HistoricoEditaisView: React.FC = () => {
 
   useEffect(() => {
     fetchConsultas();
-
-    // Checar se as tabelas do histórico existem no Supabase
-    if (isSupabaseConfigured()) {
-      testSupabaseHistoricoConnection()
-        .then((res) => {
-          setTableStatus({
-            checked: true,
-            exists: res.tablesExist,
-            message: res.message
-          });
-        })
-        .catch(() => {
-          // Ignorar silenciosamente falhas transitórias
-        });
-    }
   }, []);
 
   const handleOpenResults = async (c: ConsultaEdital) => {
@@ -107,14 +75,14 @@ export const HistoricoEditaisView: React.FC = () => {
   };
 
   const handleDelete = async (id: string, fileName: string) => {
-    if (window.confirm(`Deseja remover o registro de "${fileName}" do histórico do Supabase?`)) {
+    if (window.confirm(`Deseja remover o registro de "${fileName}" do histórico?`)) {
       setDeletingId(id);
       try {
         const success = await deleteConsulta(id);
         if (success) {
           setConsultas(prev => prev.filter(c => c.id !== id));
         } else {
-          alert('Não foi possível excluir o registro. Verifique a conexão com o Supabase.');
+          alert('Não foi possível excluir o registro. Verifique sua conexão.');
         }
       } catch (e: any) {
         console.error('Erro ao excluir consulta:', e);
@@ -123,35 +91,6 @@ export const HistoricoEditaisView: React.FC = () => {
         setDeletingId(null);
       }
     }
-  };
-
-  const handleMigrate = async () => {
-    if (!window.confirm('Deseja migrar todos os editais salvos localmente neste navegador para o Supabase?')) {
-      return;
-    }
-
-    setIsMigrating(true);
-    setMigrationMessage(null);
-    try {
-      const res = await migrateLocalHistoryToSupabase();
-      if (res.success) {
-        setMigrationMessage(`Sucesso! ${res.migratedCount} consultas foram transferidas com sucesso para o Supabase.`);
-        setHasLocalMigration(false);
-        await fetchConsultas();
-      } else {
-        setMigrationMessage(`Aviso: ${res.error || 'Ocorreu um erro durante a migração.'}`);
-      }
-    } catch (err: any) {
-      setMigrationMessage(`Erro: ${err.message || 'Falha ao migrar histórico.'}`);
-    } finally {
-      setIsMigrating(false);
-    }
-  };
-
-  const handleCopySql = () => {
-    navigator.clipboard.writeText(SUPABASE_HISTORICO_SQL_SCRIPT);
-    setCopiedSql(true);
-    setTimeout(() => setCopiedSql(false), 2500);
   };
 
   const safeConsultas = Array.isArray(consultas) ? consultas : [];
@@ -178,25 +117,15 @@ export const HistoricoEditaisView: React.FC = () => {
             </h1>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
               <Database size={11} />
-              Base Centralizada Supabase
+              Base Centralizada
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Consultas armazenadas e compartilhadas na nuvem para auditoria, relatórios e conferência sem necessidade de reprocessar os PDFs.
+            Consultas armazenadas e compartilhadas para auditoria, relatórios e conferência sem necessidade de reprocessar os PDFs.
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setIsSqlModalOpen(true)}
-            title="Ver script SQL das tabelas de histórico do Supabase"
-          >
-            <Database size={14} className="text-blue-600" />
-            <span className="hidden sm:inline">Script SQL</span>
-          </Button>
-
           <Button
             variant="secondary"
             size="sm"
@@ -221,63 +150,6 @@ export const HistoricoEditaisView: React.FC = () => {
         </div>
       </div>
 
-      {/* Banner se tabelas do Supabase precisarem ser criadas */}
-      {tableStatus && !tableStatus.exists && (
-        <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-amber-900">
-          <div className="flex items-start gap-3">
-            <AlertCircle size={20} className="text-amber-600 shrink-0 mt-0.5" />
-            <div className="text-xs">
-              <strong className="block font-semibold">Tabelas de Histórico no Supabase</strong>
-              <span>As tabelas <code>consultas_editais</code> e <code>resultados_editais</code> precisam ser criadas no Supabase SQL Editor.</span>
-            </div>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={() => setIsSqlModalOpen(true)}
-            className="shrink-0"
-          >
-            <Copy size={13} />
-            Ver Script de Criação
-          </Button>
-        </div>
-      )}
-
-      {/* Banner de migração de histórico local */}
-      {hasLocalMigration && (
-        <div className="bg-blue-50 border border-blue-200 p-4 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-blue-900">
-          <div className="flex items-start gap-3">
-            <Sparkles size={20} className="text-blue-600 shrink-0 mt-0.5" />
-            <div className="text-xs">
-              <strong className="block font-semibold">Migração para a Base Centralizada</strong>
-              <span>Detectamos históricos gravados neste navegador antes da migração. Deseja sincronizá-los com o Supabase?</span>
-            </div>
-          </div>
-          <Button
-            variant="primary"
-            size="sm"
-            onClick={handleMigrate}
-            disabled={isMigrating}
-            className="shrink-0"
-          >
-            {isMigrating ? <Loader2 size={13} className="animate-spin" /> : <Database size={13} />}
-            {isMigrating ? 'Migrando...' : 'Migrar para o Supabase'}
-          </Button>
-        </div>
-      )}
-
-      {migrationMessage && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-lg flex items-center justify-between">
-          <span>{migrationMessage}</span>
-          <button 
-            onClick={() => setMigrationMessage(null)} 
-            className="text-emerald-700 font-bold ml-2 cursor-pointer hover:underline"
-          >
-            Fechar
-          </button>
-        </div>
-      )}
-
       {/* History Table */}
       <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
         <div className="overflow-x-auto">
@@ -301,7 +173,7 @@ export const HistoricoEditaisView: React.FC = () => {
                   <td colSpan={9} className="px-6 py-12 text-center text-gray-500">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <Loader2 size={24} className="animate-spin text-blue-600" />
-                      <span className="text-xs text-slate-500">Carregando histórico do Supabase...</span>
+                      <span className="text-xs text-slate-500">Carregando histórico...</span>
                     </div>
                   </td>
                 </tr>
@@ -476,43 +348,6 @@ export const HistoricoEditaisView: React.FC = () => {
 
             <div className="flex justify-end pt-2 border-t border-gray-100">
               <Button variant="primary" onClick={() => setSelectedConsulta(null)}>
-                Fechar
-              </Button>
-            </div>
-          </div>
-        </Modal>
-      )}
-
-      {/* Modal: SQL Script do Histórico */}
-      {isSqlModalOpen && (
-        <Modal
-          isOpen={isSqlModalOpen}
-          onClose={() => setIsSqlModalOpen(false)}
-          title="Script SQL do Histórico de Editais (Supabase)"
-          subtitle="Tabelas consultas_editais e resultados_editais com RLS e índices"
-          icon={<Database size={20} className="text-blue-600" />}
-          maxWidth="4xl"
-        >
-          <div className="space-y-4">
-            <p className="text-xs text-slate-600">
-              Execute o script abaixo no <strong>SQL Editor</strong> do seu painel Supabase para criar as tabelas do histórico caso ainda não tenham sido criadas:
-            </p>
-
-            <div className="relative">
-              <pre className="bg-slate-900 text-slate-100 font-mono text-[11px] p-4 rounded-xl overflow-x-auto max-h-[50vh] leading-relaxed">
-                {SUPABASE_HISTORICO_SQL_SCRIPT}
-              </pre>
-              <button
-                onClick={handleCopySql}
-                className="absolute top-3 right-3 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium flex items-center gap-1.5 shadow-md transition-colors cursor-pointer"
-              >
-                {copiedSql ? <Check size={14} /> : <Copy size={14} />}
-                {copiedSql ? 'Copiado!' : 'Copiar SQL'}
-              </button>
-            </div>
-
-            <div className="flex justify-end pt-2 border-t border-gray-200">
-              <Button variant="secondary" onClick={() => setIsSqlModalOpen(false)}>
                 Fechar
               </Button>
             </div>

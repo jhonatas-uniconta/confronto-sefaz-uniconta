@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { AlertTriangle, RefreshCw, Trash2, ShieldAlert } from 'lucide-react';
+import { AlertTriangle, RefreshCw, ShieldAlert } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
@@ -32,17 +32,6 @@ export class ErrorBoundary extends Component<Props, State> {
     window.location.reload();
   };
 
-  private handleClearCacheAndReload = () => {
-    try {
-      localStorage.removeItem('uniconta_supabase_url');
-      localStorage.removeItem('uniconta_supabase_anon_key');
-      sessionStorage.clear();
-    } catch (e) {
-      console.warn('Erro ao limpar storage:', e);
-    }
-    window.location.href = '/';
-  };
-
   public render() {
     if (this.state.hasError) {
       return (
@@ -59,27 +48,13 @@ export class ErrorBoundary extends Component<Props, State> {
               O sistema encontrou um erro inesperado durante o carregamento. Não se preocupe, seus dados estão protegidos.
             </p>
 
-            {this.state.error && (
-              <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 text-left mb-6 font-mono text-xs text-red-400 overflow-x-auto max-h-36">
-                <span className="font-semibold text-slate-400 block mb-1">Mensagem do erro:</span>
-                {this.state.error.message || String(this.state.error)}
-              </div>
-            )}
-
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <div className="flex justify-center">
               <button
                 onClick={this.handleReload}
-                className="flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors shadow-lg shadow-blue-600/20 cursor-pointer"
+                className="flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-medium text-sm transition-colors shadow-lg shadow-blue-600/20 cursor-pointer"
               >
                 <RefreshCw size={16} />
                 Recarregar Sistema
-              </button>
-              <button
-                onClick={this.handleClearCacheAndReload}
-                className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-medium text-sm transition-colors border border-slate-700 cursor-pointer"
-              >
-                <Trash2 size={16} />
-                Reiniciar Configurações
               </button>
             </div>
 
